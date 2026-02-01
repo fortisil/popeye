@@ -1,6 +1,15 @@
 # Popeye CLI
 
+[![npm version](https://img.shields.io/npm/v/popeye-cli.svg)](https://www.npmjs.com/package/popeye-cli)
+[![npm downloads](https://img.shields.io/npm/dm/popeye-cli.svg)](https://www.npmjs.com/package/popeye-cli)
+
 A fully autonomous code generation tool that transforms your ideas into complete, tested, deployable code projects using AI-powered planning, consensus, and implementation.
+
+## Quick Install
+
+```bash
+npm install -g popeye-cli
+```
 
 ## What is Popeye?
 
