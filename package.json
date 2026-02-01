@@ -1,0 +1,66 @@
+{
+  "name": "popeye-cli",
+  "version": "1.0.3",
+  "description": "Fully autonomous code generation tool powered by Claude CLI and OpenAI consensus",
+  "main": "./dist/index.js",
+  "bin": {
+    "popeye": "./dist/index.js",
+    "popeye-cli": "./dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "cli",
+    "code-generation",
+    "claude",
+    "openai",
+    "ai",
+    "autonomous",
+    "typescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.12",
+    "@google/generative-ai": "^0.24.1",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "cosmiconfig": "^9.0.0",
+    "express": "^4.21.0",
+    "open": "^10.1.0",
+    "openai": "^4.73.0",
+    "ora": "^8.1.0",
+    "uuid": "^10.0.0",
+    "yaml": "^2.6.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.17.6",
+    "@types/uuid": "^10.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.14.0",
+    "@typescript-eslint/parser": "^8.14.0",
+    "@vitest/coverage-v8": "^2.1.4",
+    "eslint": "^9.14.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.53.1",
+    "vitest": "^2.1.4"
+  }
+}

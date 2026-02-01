@@ -1,0 +1,308 @@
+/**
+ * Create command
+ * One-shot project creation from an idea
+ */
+
+import { Command } from 'commander';
+import path from 'node:path';
+import { ProjectSpecSchema, type OutputLanguage, type OpenAIModel } from '../../types/project.js';
+import { requireAuth } from '../../auth/index.js';
+import { runWorkflow } from '../../workflow/index.js';
+import { generateProject, projectDirExists, cleanupProject } from '../../generators/index.js';
+import {
+  printHeader,
+  printSection,
+  printSuccess,
+  printError,
+  printWarning,
+  printInfo,
+  printKeyValue,
+  printConsensusResult,
+  startSpinner,
+  updateSpinner,
+  succeedSpinner,
+  failSpinner,
+  stopSpinner,
+} from '../output.js';
+
+/**
+ * Create the create command
+ */
+export function createCreateCommand(): Command {
+  const create = new Command('create')
+    .description('Create a new project from an idea')
+    .argument('<idea>', 'Project idea or description')
+    .option('-n, --name <name>', 'Project name')
+    .option(
+      '-l, --language <lang>',
+      'Output language (python, typescript)',
+      'python'
+    )
+    .option(
+      '-m, --model <model>',
+      'OpenAI model for consensus (gpt-4o, gpt-4o-mini, o1-preview)',
+      'gpt-4o'
+    )
+    .option(
+      '-o, --output <dir>',
+      'Output directory',
+      process.cwd()
+    )
+    .option(
+      '--threshold <percent>',
+      'Consensus threshold percentage',
+      '95'
+    )
+    .option(
+      '--max-iterations <count>',
+      'Maximum consensus iterations',
+      '5'
+    )
+    .option(
+      '--skip-scaffold',
+      'Skip initial project scaffolding'
+    )
+    .action(async (idea: string, options) => {
+      try {
+        // Validate inputs
+        const language = options.language as OutputLanguage;
+        if (!['python', 'typescript'].includes(language)) {
+          printError(`Invalid language: ${language}. Use 'python' or 'typescript'.`);
+          process.exit(1);
+        }
+
+        const model = options.model as OpenAIModel;
+        const validModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'];
+        if (!validModels.includes(model)) {
+          printError(`Invalid model: ${model}. Use one of: ${validModels.join(', ')}`);
+          process.exit(1);
+        }
+
+        // Generate project name from idea if not provided
+        const projectName = options.name || generateProjectName(idea);
+        const outputDir = path.resolve(options.output);
+        const projectDir = path.join(outputDir, projectName);
+        const threshold = parseInt(options.threshold, 10);
+        const maxIterations = parseInt(options.maxIterations, 10);
+
+        // Validate project spec
+        const specResult = ProjectSpecSchema.safeParse({
+          idea,
+          name: projectName,
+          language,
+          openaiModel: model,
+          outputDir,
+        });
+
+        if (!specResult.success) {
+          printError(`Invalid project specification: ${specResult.error.message}`);
+          process.exit(1);
+        }
+
+        const spec = specResult.data;
+
+        // Print header
+        printHeader('Popeye CLI - Project Creation');
+
+        printSection('Project Configuration');
+        printKeyValue('Name', projectName);
+        printKeyValue('Language', language);
+        printKeyValue('Model', model);
+        printKeyValue('Output', projectDir);
+        printKeyValue('Threshold', `${threshold}%`);
+        console.log();
+
+        printSection('Idea');
+        console.log(`  ${idea}`);
+        console.log();
+
+        // Check if directory exists
+        if (await projectDirExists(projectDir)) {
+          printWarning(`Directory already exists: ${projectDir}`);
+          printInfo('Use a different name or output directory');
+          process.exit(1);
+        }
+
+        // Require authentication
+        printSection('Authentication');
+        startSpinner('Checking authentication...');
+
+        try {
+          await requireAuth();
+          succeedSpinner('Authentication verified');
+        } catch (error) {
+          failSpinner('Authentication required');
+          printError(error instanceof Error ? error.message : 'Authentication failed');
+          process.exit(1);
+        }
+
+        // Generate project scaffold
+        if (!options.skipScaffold) {
+          printSection('Project Scaffolding');
+          startSpinner('Creating project structure...');
+
+          const scaffoldResult = await generateProject(spec, outputDir);
+
+          if (!scaffoldResult.success) {
+            failSpinner('Scaffolding failed');
+            printError(scaffoldResult.error || 'Failed to create project structure');
+            process.exit(1);
+          }
+
+          succeedSpinner(`Created ${scaffoldResult.filesCreated.length} files`);
+        }
+
+        // Run the workflow
+        printSection('Workflow Execution');
+
+        const workflowResult = await runWorkflow(spec, {
+          projectDir,
+          consensusConfig: {
+            threshold,
+            maxIterations,
+            openaiModel: model,
+          },
+          onProgress: (phase, message) => {
+            handleProgressUpdate(phase, message);
+          },
+        });
+
+        // Stop any running spinner
+        stopSpinner();
+
+        // Print results
+        console.log();
+        if (workflowResult.success) {
+          printHeader('Project Created Successfully!');
+
+          printSection('Summary');
+          printKeyValue('Location', projectDir);
+          printKeyValue('Language', language);
+
+          if (workflowResult.planResult?.consensusResult) {
+            printKeyValue('Final Consensus', `${workflowResult.planResult.consensusResult.finalScore}%`);
+            printKeyValue('Iterations', workflowResult.planResult.consensusResult.totalIterations.toString());
+          }
+
+          if (workflowResult.executionResult) {
+            printKeyValue('Tasks Completed', workflowResult.executionResult.completedTasks.toString());
+          }
+
+          console.log();
+          printSuccess('Your project is ready!');
+          console.log();
+          printInfo(`cd ${projectDir}`);
+          printInfo(language === 'python' ? 'python -m pytest tests/' : 'npm test');
+        } else {
+          printHeader('Project Creation Failed');
+
+          if (workflowResult.error) {
+            printError(workflowResult.error);
+          }
+
+          if (workflowResult.planResult?.consensusResult) {
+            printSection('Consensus Status');
+            printConsensusResult(
+              workflowResult.planResult.consensusResult.iterations[
+                workflowResult.planResult.consensusResult.iterations.length - 1
+              ]?.result || { score: 0, analysis: '', approved: false, rawResponse: '' }
+            );
+          }
+
+          // Cleanup on failure
+          printWarning('Cleaning up failed project...');
+          await cleanupProject(projectDir);
+
+          process.exit(1);
+        }
+      } catch (error) {
+        stopSpinner();
+        printError(error instanceof Error ? error.message : 'Unknown error');
+        process.exit(1);
+      }
+    });
+
+  return create;
+}
+
+/**
+ * Generate a project name from an idea
+ */
+function generateProjectName(idea: string): string {
+  // Take first few words, lowercase, replace spaces with hyphens
+  return idea
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .slice(0, 3)
+    .join('-')
+    .substring(0, 30) || 'my-project';
+}
+
+/**
+ * Handle progress updates from the workflow
+ */
+let currentSpinner: ReturnType<typeof startSpinner> | null = null;
+let lastPhase = '';
+
+function handleProgressUpdate(phase: string, message: string): void {
+  // Map phases to user-friendly names
+  const phaseNames: Record<string, string> = {
+    'plan-init': 'Initializing',
+    'expand-idea': 'Expanding Idea',
+    'get-context': 'Analyzing Context',
+    'create-plan': 'Creating Plan',
+    'consensus': 'Consensus Review',
+    'execution-start': 'Starting Execution',
+    'task-start': 'Executing Task',
+    'task-complete': 'Task Complete',
+    'task-failed': 'Task Failed',
+    'execution-complete': 'Execution Complete',
+    'complete': 'Complete',
+    'failed': 'Failed',
+    'error': 'Error',
+    'workflow': 'Workflow',
+  };
+
+  const phaseName = phaseNames[phase] || phase;
+
+  // Handle phase transitions
+  if (phase !== lastPhase) {
+    if (currentSpinner) {
+      if (phase === 'error' || phase === 'failed') {
+        failSpinner();
+      } else {
+        succeedSpinner();
+      }
+    }
+
+    if (!['complete', 'failed', 'error', 'task-complete', 'task-failed'].includes(phase)) {
+      currentSpinner = startSpinner(`${phaseName}: ${message}`);
+    }
+
+    lastPhase = phase;
+  } else if (currentSpinner) {
+    updateSpinner(`${phaseName}: ${message}`);
+  }
+
+  // Handle terminal phases
+  if (phase === 'complete') {
+    if (currentSpinner) {
+      succeedSpinner(message);
+      currentSpinner = null;
+    } else {
+      printSuccess(message);
+    }
+  } else if (phase === 'failed' || phase === 'error') {
+    if (currentSpinner) {
+      failSpinner(message);
+      currentSpinner = null;
+    } else {
+      printError(message);
+    }
+  } else if (phase === 'task-complete') {
+    printSuccess(message);
+  } else if (phase === 'task-failed') {
+    printError(message);
+  }
+}
