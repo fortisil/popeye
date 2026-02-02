@@ -80,6 +80,145 @@ Popeye uses multiple AI systems that must agree before implementation begins:
 
 Plans are iteratively refined until systems reach **95%+ consensus**, ensuring well-thought-out implementations. When consensus cannot be reached, an arbitrator (Gemini by default) makes the final decision.
 
+---
+
+## The AI Development Team Model
+
+Popeye is built around a simple belief:
+
+> **One AI writing code is dangerous. Multiple AIs disagreeing, reviewing, and resolving conflict is powerful.**
+
+Instead of a single "genius" model, Popeye operates as a **virtual AI development team**, each role with a clear responsibility.
+
+Every decision is recorded. Every disagreement is traceable. Nothing happens silently.
+
+### The Three Roles
+
+#### 1. Planner & Builder (The Implementer)
+
+This role is responsible for **moving from idea to code**.
+
+It:
+- expands your idea into a full technical specification
+- proposes architecture and project structure
+- generates backend, frontend, configs, and tests
+- makes concrete implementation choices
+
+Think of this role as:
+> *A senior engineer translating product intent into working software.*
+
+#### 2. Reviewer (The Skeptic)
+
+This role **does not write code**. Its job is to **challenge it**.
+
+It:
+- reviews the spec for gaps, contradictions, or risky assumptions
+- checks generated code for correctness, maintainability, and structure
+- looks for missing edge cases and test coverage
+- flags anything that "works" but shouldn't ship
+
+Think of this role as:
+> *A strict code reviewer who wasn't emotionally attached to the solution.*
+
+#### 3. Arbitrator (The Tie-Breaker)
+
+When the Planner and Reviewer disagree, Popeye does **not** pick randomly.
+
+The Arbitrator:
+- evaluates both sides' arguments
+- weighs correctness, simplicity, safety, and scope
+- makes a final decision when consensus cannot be reached
+- documents *why* the decision was made
+
+Think of this role as:
+> *A tech lead making the call after a heated design review.*
+
+### How the Loop Works
+
+```
+1. You describe your idea
+2. Planner generates a spec and implementation
+3. Reviewer audits the plan and code
+4. If the Reviewer approves → continue
+5. If the Reviewer objects → feedback is sent back
+6. If disagreement persists → Arbitrator decides
+7. Final decision is applied and logged
+```
+
+No silent overrides. No "AI magic happened here".
+
+### Everything Is Recorded
+
+Popeye keeps a **paper trail**.
+
+For each project, it records:
+- the original user intent
+- the expanded specification
+- reviewer feedback
+- arbitration decisions
+- applied fixes and changes
+
+This makes the system:
+- debuggable
+- auditable
+- explainable
+- reproducible
+
+You can always answer: *"Why was this built this way?"*
+
+### Why This Matters
+
+Most AI code generators fail because:
+- they don't question themselves
+- they optimize for speed over correctness
+- they hide mistakes behind confidence
+
+Popeye assumes:
+- first drafts are wrong
+- disagreement is healthy
+- quality emerges from review, not generation
+
+This is how real engineering teams work. Popeye simply encodes that discipline into software.
+
+### Not Perfect — Intentionally Transparent
+
+The AI team can:
+- miss edge cases
+- argue poorly
+- make suboptimal calls
+
+That's why:
+- logs are visible
+- prompts are editable
+- decisions are inspectable
+- contributors can improve the process itself
+
+You're not just reviewing code — you're reviewing **how decisions are made**.
+
+### An Open Experiment
+
+Popeye is not claiming:
+> "This is how AI development *must* work."
+
+It's saying:
+> "This is one honest attempt — in the open."
+
+If you believe there should be more roles, better arbitration logic, stronger review heuristics, or domain-specific reviewers — you can build them. The AI team is **part of the product**, not a black box.
+
+### Where This Can Go
+
+Over time, Popeye can evolve into:
+- specialized reviewers (security, performance, UX)
+- human-in-the-loop arbitration
+- configurable team topologies
+- per-project governance rules
+
+But it starts with one principle:
+
+> **AI should argue before it commits.**
+
+---
+
 ## Prerequisites
 
 Before installing Popeye, ensure you have:
