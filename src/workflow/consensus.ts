@@ -4,13 +4,28 @@
  * with arbitration support when consensus cannot be reached
  */
 
-import type { ConsensusResult, ConsensusIteration, ConsensusConfig, ArbitrationResult, AIProvider } from '../types/consensus.js';
+import type {
+  ConsensusResult,
+  ConsensusIteration,
+  ConsensusConfig,
+  ArbitrationResult,
+  AIProvider,
+  TaggedItem,
+  AppConsensusScores,
+  CorrectionRecord,
+} from '../types/consensus.js';
 import { DEFAULT_CONSENSUS_CONFIG } from '../types/consensus.js';
 import { requestConsensus as requestOpenAIConsensus } from '../adapters/openai.js';
 import { requestConsensus as requestGeminiConsensus, requestArbitration as requestGeminiArbitration } from '../adapters/gemini.js';
+import { requestConsensus as requestGrokConsensus, requestArbitration as requestGrokArbitration } from '../adapters/grok.js';
 import { revisePlan } from '../adapters/claude.js';
 import { recordConsensusIteration } from '../state/index.js';
-import { createPlanStorage, type ReviewerFeedback } from './plan-storage.js';
+import {
+  createPlanStorage,
+  type ReviewerFeedback,
+  type FullstackReviewerFeedback,
+  type FeedbackAppTarget,
+} from './plan-storage.js';
 
 /**
  * Options for consensus iteration
@@ -18,6 +33,10 @@ import { createPlanStorage, type ReviewerFeedback } from './plan-storage.js';
 export interface ConsensusOptions {
   projectDir: string;
   config?: Partial<ConsensusConfig>;
+  /** Whether this is a fullstack project (enables per-app tracking) */
+  isFullstack?: boolean;
+  /** Project language for revision prompts */
+  language?: 'python' | 'typescript' | 'fullstack';
   onIteration?: (iteration: number, result: ConsensusResult) => void;
   onRevision?: (iteration: number, revisedPlan: string) => void;
   onConcerns?: (concerns: string[], recommendations: string[]) => void;
@@ -46,7 +65,7 @@ export interface ConsensusProcessResult {
 }
 
 /**
- * Request consensus from the configured reviewer (OpenAI or Gemini)
+ * Request consensus from the configured reviewer (OpenAI, Gemini, or Grok)
  */
 async function requestReviewerConsensus(
   plan: string,
@@ -61,7 +80,32 @@ async function requestReviewerConsensus(
       maxTokens: config.maxTokens,
     });
   }
+  if (reviewer === 'grok') {
+    return requestGrokConsensus(plan, context, {
+      model: config.grokModel,
+      temperature: config.temperature,
+      maxTokens: config.maxTokens,
+    });
+  }
   return requestOpenAIConsensus(plan, context, config);
+}
+
+/**
+ * Request arbitration from the configured arbitrator (OpenAI, Gemini, or Grok)
+ */
+async function requestArbitratorDecision(
+  plan: string,
+  reviewerFeedback: string,
+  claudeFeedback: string,
+  iterations: number,
+  scores: number[],
+  arbitrator: AIProvider
+): Promise<ArbitrationResult> {
+  if (arbitrator === 'grok') {
+    return requestGrokArbitration(plan, reviewerFeedback, claudeFeedback, iterations, scores);
+  }
+  // Default to Gemini for arbitration (most capable at reasoning)
+  return requestGeminiArbitration(plan, reviewerFeedback, claudeFeedback, iterations, scores);
 }
 
 /**
@@ -183,12 +227,17 @@ export async function iterateUntilConsensus(
   const {
     projectDir,
     config = {},
+    isFullstack = false,
+    language: providedLanguage,
     onIteration,
     onRevision,
     onConcerns,
     onArbitration,
     onProgress,
   } = options;
+
+  // Derive language from isFullstack if not explicitly provided
+  const language = providedLanguage || (isFullstack ? 'fullstack' : 'python');
 
   const {
     threshold = DEFAULT_CONSENSUS_CONFIG.threshold,
@@ -232,12 +281,13 @@ export async function iterateUntilConsensus(
 
       try {
         arbitrationAttempts++;
-        const arbitrationResult = await requestGeminiArbitration(
+        const arbitrationResult = await requestArbitratorDecision(
           bestPlan,
           lastAnalysis,
           `Consensus timed out after ${Math.round(totalElapsed / 60000)} minutes. Best score: ${bestScore}%. Main concerns: ${lastConcerns.slice(0, 3).join('; ')}`,
           iteration,
-          scores
+          scores,
+          arbitrator
         );
 
         if (onArbitration) {
@@ -363,12 +413,13 @@ export async function iterateUntilConsensus(
       onProgress?.('arbitration', `Consensus stuck at ${bestScore}%, invoking ${arbitrator} arbitrator (attempt ${arbitrationAttempts}/${maxArbitrationAttempts})...`);
 
       try {
-        const arbitrationResult = await requestGeminiArbitration(
+        const arbitrationResult = await requestArbitratorDecision(
           bestPlan,
           lastAnalysis,
           `The plan has been revised ${iteration} times. Best score achieved: ${bestScore}%. The reviewer's main concerns are: ${lastConcerns.slice(0, 3).join('; ')}`,
           iteration,
-          scores
+          scores,
+          arbitrator
         );
 
         if (onArbitration) {
@@ -409,7 +460,8 @@ export async function iterateUntilConsensus(
             const revisionResult = await revisePlan(
               bestPlan,
               arbitrationResult.reasoning,
-              arbitrationResult.suggestedChanges
+              arbitrationResult.suggestedChanges,
+              language
             );
             if (revisionResult.success && revisionResult.response) {
               currentPlan = revisionResult.response;
@@ -459,6 +511,7 @@ export async function iterateUntilConsensus(
         currentPlan,
         consensusResult.analysis,
         concerns,
+        language,
         revisionProgress
       );
 
@@ -643,6 +696,28 @@ export interface OptimizedConsensusOptions extends ConsensusOptions {
   parallelReviews?: boolean;
   /** Additional reviewers beyond primary */
   additionalReviewers?: AIProvider[];
+  /** Whether this is a fullstack project (enables per-app tracking) */
+  isFullstack?: boolean;
+}
+
+/**
+ * Result for fullstack consensus with per-app tracking
+ */
+export interface FullstackConsensusProcessResult extends ConsensusProcessResult {
+  /** Per-app scores */
+  appScores: AppConsensusScores;
+  /** Per-app approval status */
+  appApproved: {
+    frontend?: boolean;
+    backend?: boolean;
+    unified: boolean;
+  };
+  /** Tagged concerns by app */
+  taggedConcerns: TaggedItem[];
+  /** Tagged recommendations by app */
+  taggedRecommendations: TaggedItem[];
+  /** Corrections made during consensus */
+  corrections: CorrectionRecord[];
 }
 
 /**
@@ -698,6 +773,143 @@ async function collectAllFeedback(
 }
 
 /**
+ * Categorize a concern or recommendation by app target
+ * Analyzes text content to determine if it relates to frontend, backend, or unified
+ */
+function categorizeByContent(content: string): FeedbackAppTarget {
+  const lowerContent = content.toLowerCase();
+
+  // Frontend indicators
+  const frontendKeywords = [
+    'react', 'component', 'jsx', 'tsx', 'css', 'tailwind', 'ui', 'user interface',
+    'button', 'form', 'input', 'modal', 'page', 'router', 'navigation', 'state management',
+    'redux', 'zustand', 'vite', 'frontend', 'front-end', 'client', 'browser', 'dom',
+    'styling', 'layout', 'responsive', 'animation', 'hook', 'usestate', 'useeffect',
+    'shadcn', 'radix', 'tailwindcss', 'vitest', 'jest', 'testing-library', 'playwright',
+  ];
+
+  // Backend indicators
+  const backendKeywords = [
+    'fastapi', 'api', 'endpoint', 'route', 'database', 'sql', 'postgresql', 'neon',
+    'model', 'schema', 'migration', 'orm', 'sqlalchemy', 'pydantic', 'validation',
+    'authentication', 'authorization', 'jwt', 'token', 'middleware', 'backend', 'back-end',
+    'server', 'python', 'pytest', 'alembic', 'celery', 'redis', 'cache', 'queue',
+    'repository', 'service', 'crud', 'rest', 'graphql', 'websocket',
+  ];
+
+  // Count matches
+  let frontendMatches = 0;
+  let backendMatches = 0;
+
+  for (const keyword of frontendKeywords) {
+    if (lowerContent.includes(keyword)) {
+      frontendMatches++;
+    }
+  }
+
+  for (const keyword of backendKeywords) {
+    if (lowerContent.includes(keyword)) {
+      backendMatches++;
+    }
+  }
+
+  // Determine category
+  if (frontendMatches > backendMatches && frontendMatches >= 2) {
+    return 'frontend';
+  } else if (backendMatches > frontendMatches && backendMatches >= 2) {
+    return 'backend';
+  } else {
+    return 'unified';
+  }
+}
+
+/**
+ * Categorize all concerns and recommendations by app target
+ */
+function categorizeFeedbackItems(
+  concerns: string[],
+  recommendations: string[]
+): {
+  taggedConcerns: TaggedItem[];
+  taggedRecommendations: TaggedItem[];
+  appScores: { frontend: number; backend: number; unified: number };
+} {
+  const taggedConcerns: TaggedItem[] = concerns.map(concern => ({
+    app: categorizeByContent(concern),
+    content: concern,
+  }));
+
+  const taggedRecommendations: TaggedItem[] = recommendations.map(rec => ({
+    app: categorizeByContent(rec),
+    content: rec,
+  }));
+
+  // Count items per app for score calculation
+  const frontendConcerns = taggedConcerns.filter(c => c.app === 'frontend').length;
+  const backendConcerns = taggedConcerns.filter(c => c.app === 'backend').length;
+  const unifiedConcerns = taggedConcerns.filter(c => c.app === 'unified').length;
+
+  const frontendRecs = taggedRecommendations.filter(r => r.app === 'frontend').length;
+  const backendRecs = taggedRecommendations.filter(r => r.app === 'backend').length;
+  const unifiedRecs = taggedRecommendations.filter(r => r.app === 'unified').length;
+
+  // Calculate relative scores (more concerns = lower score)
+  const totalItems = taggedConcerns.length + taggedRecommendations.length;
+  const baseScore = totalItems > 0 ? 100 : 0;
+
+  return {
+    taggedConcerns,
+    taggedRecommendations,
+    appScores: {
+      frontend: Math.max(0, baseScore - (frontendConcerns + frontendRecs) * 5),
+      backend: Math.max(0, baseScore - (backendConcerns + backendRecs) * 5),
+      unified: Math.max(0, baseScore - (unifiedConcerns + unifiedRecs) * 5),
+    },
+  };
+}
+
+/**
+ * Calculate per-app scores from feedback
+ */
+function calculateAppScores(
+  allFeedback: ReviewerFeedback[],
+  taggedConcerns: TaggedItem[],
+  taggedRecommendations: TaggedItem[]
+): AppConsensusScores {
+  // Base score from average feedback score
+  const baseScore = allFeedback.length > 0
+    ? Math.round(allFeedback.reduce((sum, f) => sum + f.score, 0) / allFeedback.length)
+    : 0;
+
+  // Count concerns per app
+  const frontendConcerns = taggedConcerns.filter(c => c.app === 'frontend').length;
+  const backendConcerns = taggedConcerns.filter(c => c.app === 'backend').length;
+  const unifiedConcerns = taggedConcerns.filter(c => c.app === 'unified').length;
+
+  const frontendRecs = taggedRecommendations.filter(r => r.app === 'frontend').length;
+  const backendRecs = taggedRecommendations.filter(r => r.app === 'backend').length;
+
+  // Calculate app-specific scores
+  // More concerns = lower score (each concern/rec reduces score by 2 points)
+  const frontendScore = frontendConcerns > 0 || frontendRecs > 0
+    ? Math.max(0, baseScore - (frontendConcerns * 2 + frontendRecs))
+    : baseScore;
+
+  const backendScore = backendConcerns > 0 || backendRecs > 0
+    ? Math.max(0, baseScore - (backendConcerns * 2 + backendRecs))
+    : baseScore;
+
+  // Unified score is the base combined score
+  const unifiedScore = Math.max(0, baseScore - (unifiedConcerns * 2));
+
+  return {
+    frontend: frontendScore,
+    backend: backendScore,
+    unified: unifiedScore,
+  };
+}
+
+/**
  * Optimized consensus process that batches feedback and reduces API calls
  *
  * Key optimizations:
@@ -705,17 +917,18 @@ async function collectAllFeedback(
  * 2. Collects ALL reviewer feedback before revision
  * 3. Claude revises ONCE per round with combined feedback
  * 4. Parallel reviews when multiple reviewers configured
+ * 5. Per-app tracking for fullstack projects (frontend/backend/unified)
  *
  * @param initialPlan - The initial plan to seek consensus on
  * @param context - Project context for review
  * @param options - Consensus options including tracking info
- * @returns Consensus process result
+ * @returns Consensus process result (FullstackConsensusProcessResult for fullstack projects)
  */
 export async function runOptimizedConsensusProcess(
   initialPlan: string,
   context: string,
   options: OptimizedConsensusOptions
-): Promise<ConsensusProcessResult> {
+): Promise<ConsensusProcessResult | FullstackConsensusProcessResult> {
   const {
     projectDir,
     config = {},
@@ -730,7 +943,11 @@ export async function runOptimizedConsensusProcess(
     taskName,
     parallelReviews = true,
     additionalReviewers = [],
+    isFullstack = false,
   } = options;
+
+  // Derive language from isFullstack for revision prompts
+  const language: 'python' | 'typescript' | 'fullstack' = isFullstack ? 'fullstack' : 'python';
 
   const {
     threshold = DEFAULT_CONSENSUS_CONFIG.threshold,
@@ -742,9 +959,19 @@ export async function runOptimizedConsensusProcess(
     stuckIterations = DEFAULT_CONSENSUS_CONFIG.stuckIterations,
   } = config;
 
-  // Initialize plan storage
-  const planStorage = createPlanStorage(projectDir);
+  // Initialize plan storage with fullstack support
+  const planStorage = createPlanStorage(projectDir, isFullstack);
   await planStorage.initialize();
+
+  // Track per-app consensus for fullstack projects
+  const appScoresHistory: { frontend: number[]; backend: number[]; unified: number[] } = {
+    frontend: [],
+    backend: [],
+    unified: [],
+  };
+  const allTaggedConcerns: TaggedItem[] = [];
+  const allTaggedRecommendations: TaggedItem[] = [];
+  const corrections: CorrectionRecord[] = [];
 
   // Determine all reviewers
   const allReviewers: AIProvider[] = [reviewer, ...additionalReviewers.filter(r => r !== reviewer)];
@@ -766,6 +993,9 @@ export async function runOptimizedConsensusProcess(
 
   onProgress?.('consensus', `Using optimized consensus with ${allReviewers.join(', ')} as reviewer(s)`);
   onProgress?.('consensus', `Plan tracking: milestone=${milestoneId}${taskId ? `, task=${taskId}` : ''}`);
+  if (isFullstack) {
+    onProgress?.('consensus', `Fullstack mode enabled - tracking per-app consensus (frontend/backend/unified)`);
+  }
 
   // Save initial plan to storage
   await planStorage.savePlan(currentPlan, taskId ? 'task' : 'milestone', {
@@ -785,12 +1015,13 @@ export async function runOptimizedConsensusProcess(
 
       if (enableArbitration) {
         try {
-          const arbitrationResult = await requestGeminiArbitration(
+          const arbitrationResult = await requestArbitratorDecision(
             bestPlan,
             lastAnalysis,
             `Timeout. Best score: ${bestScore}%. Concerns: ${lastConcerns.slice(0, 3).join('; ')}`,
             iteration,
-            scores
+            scores,
+            arbitrator
           );
 
           if (onArbitration) onArbitration(arbitrationResult);
@@ -853,9 +1084,80 @@ export async function runOptimizedConsensusProcess(
       }
     }
 
-    // Save all feedback
-    for (const feedback of allFeedback) {
-      await planStorage.saveFeedback(feedback, milestoneId, taskId);
+    // Combine all concerns and recommendations
+    const allConcerns = [...new Set(allFeedback.flatMap(f => f.concerns))];
+    const allRecommendations = [...new Set(allFeedback.flatMap(f => f.recommendations))];
+    const combinedAnalysis = allFeedback.map(f => `[${f.reviewer}] ${f.analysis}`).join('\n\n');
+
+    lastConcerns = allConcerns;
+    lastRecommendations = allRecommendations;
+
+    // ============================================
+    // FULLSTACK: Categorize feedback by app target
+    // ============================================
+    let currentAppScores: AppConsensusScores = { unified: 0 };
+    let iterationTaggedConcerns: TaggedItem[] = [];
+    let iterationTaggedRecs: TaggedItem[] = [];
+
+    if (isFullstack) {
+      onProgress?.('consensus', 'Categorizing feedback by app (frontend/backend/unified)...');
+
+      // Categorize concerns and recommendations
+      const categorized = categorizeFeedbackItems(allConcerns, allRecommendations);
+      iterationTaggedConcerns = categorized.taggedConcerns;
+      iterationTaggedRecs = categorized.taggedRecommendations;
+
+      // Calculate per-app scores
+      currentAppScores = calculateAppScores(allFeedback, iterationTaggedConcerns, iterationTaggedRecs);
+
+      // Track scores history
+      appScoresHistory.frontend.push(currentAppScores.frontend || 0);
+      appScoresHistory.backend.push(currentAppScores.backend || 0);
+      appScoresHistory.unified.push(currentAppScores.unified);
+
+      // Accumulate tagged items for final result
+      allTaggedConcerns.push(...iterationTaggedConcerns);
+      allTaggedRecommendations.push(...iterationTaggedRecs);
+
+      // Log per-app breakdown
+      const frontendConcerns = iterationTaggedConcerns.filter(c => c.app === 'frontend').length;
+      const backendConcerns = iterationTaggedConcerns.filter(c => c.app === 'backend').length;
+      const unifiedConcerns = iterationTaggedConcerns.filter(c => c.app === 'unified').length;
+
+      onProgress?.('consensus', `Per-app concerns: FE=${frontendConcerns}, BE=${backendConcerns}, Unified=${unifiedConcerns}`);
+      onProgress?.('consensus', `Per-app scores: FE=${currentAppScores.frontend}%, BE=${currentAppScores.backend}%, Unified=${currentAppScores.unified}%`);
+
+      // Save feedback to per-app directories
+      for (const feedback of allFeedback) {
+        // Create fullstack feedback with tagged items
+        const fullstackFeedback: FullstackReviewerFeedback = {
+          ...feedback,
+          appScores: currentAppScores,
+          taggedConcerns: iterationTaggedConcerns.filter(c =>
+            feedback.concerns.some(fc => fc === c.content)
+          ),
+          taggedRecommendations: iterationTaggedRecs.filter(r =>
+            feedback.recommendations.some(fr => fr === r.content)
+          ),
+          isFullstack: true,
+        };
+
+        // Save to all app directories
+        await planStorage.saveFullstackFeedback(
+          fullstackFeedback,
+          taskId ? 'task' : 'milestone',
+          milestoneId,
+          taskId
+        );
+      }
+    } else {
+      // Non-fullstack: save feedback without app categorization
+      for (const feedback of allFeedback) {
+        await planStorage.saveFeedback(feedback, milestoneId, taskId);
+      }
+      currentAppScores = { unified: allFeedback.length > 0
+        ? Math.round(allFeedback.reduce((sum, f) => sum + f.score, 0) / allFeedback.length)
+        : 0 };
     }
 
     // Calculate combined score (average of all reviewers)
@@ -864,14 +1166,6 @@ export async function runOptimizedConsensusProcess(
       : 0;
 
     scores.push(combinedScore);
-
-    // Combine all concerns and recommendations
-    const allConcerns = [...new Set(allFeedback.flatMap(f => f.concerns))];
-    const allRecommendations = [...new Set(allFeedback.flatMap(f => f.recommendations))];
-    const combinedAnalysis = allFeedback.map(f => `[${f.reviewer}] ${f.analysis}`).join('\n\n');
-
-    lastConcerns = allConcerns;
-    lastRecommendations = allRecommendations;
     lastAnalysis = combinedAnalysis;
 
     // Create consensus result for tracking
@@ -904,14 +1198,40 @@ export async function runOptimizedConsensusProcess(
       bestIteration = iteration;
     }
 
-    // Save plan with updated score
+    // Save plan with updated score (including per-app scores for fullstack)
     await planStorage.savePlan(currentPlan, taskId ? 'task' : 'milestone', {
       milestoneId,
       milestoneName,
       taskId,
       taskName,
       score: combinedScore,
+      frontendScore: isFullstack ? currentAppScores.frontend : undefined,
+      backendScore: isFullstack ? currentAppScores.backend : undefined,
+      unifiedScore: isFullstack ? currentAppScores.unified : undefined,
     });
+
+    // Record correction for fullstack tracking
+    if (isFullstack && iteration > 1) {
+      const previousScore = scores.length >= 2 ? scores[scores.length - 2] : 0;
+      const correction: CorrectionRecord = {
+        id: `correction-${iteration}`,
+        timestamp: new Date().toISOString(),
+        app: 'unified', // Top-level correction
+        previousScore,
+        newScore: combinedScore,
+        concerns: lastConcerns.slice(0, 5),
+        changes: lastRecommendations.slice(0, 3),
+        reviewer,
+      };
+      corrections.push(correction);
+
+      await planStorage.recordCorrection(
+        taskId ? 'task' : 'milestone',
+        correction,
+        milestoneId,
+        taskId
+      );
+    }
 
     // Record in project state
     await recordConsensusIteration(projectDir, iterationRecord);
@@ -921,7 +1241,43 @@ export async function runOptimizedConsensusProcess(
     // Check if consensus reached
     if (combinedScore >= threshold) {
       onProgress?.('consensus', `Consensus reached at ${combinedScore}%`);
-      await planStorage.updateStatus('approved', milestoneId, taskId);
+      await planStorage.updateStatus('approved', taskId ? 'task' : 'milestone', milestoneId, taskId);
+
+      // Update per-app approval status for fullstack
+      if (isFullstack) {
+        const feApproved = (currentAppScores.frontend || 0) >= threshold;
+        const beApproved = (currentAppScores.backend || 0) >= threshold;
+
+        await planStorage.updateAppApproval(taskId ? 'task' : 'milestone', 'frontend', feApproved, currentAppScores.frontend || 0, milestoneId, taskId);
+        await planStorage.updateAppApproval(taskId ? 'task' : 'milestone', 'backend', beApproved, currentAppScores.backend || 0, milestoneId, taskId);
+        await planStorage.updateAppApproval(taskId ? 'task' : 'milestone', 'unified', true, currentAppScores.unified, milestoneId, taskId);
+
+        onProgress?.('consensus', `Per-app approval: FE=${feApproved}, BE=${beApproved}, Unified=true`);
+
+        return {
+          approved: true,
+          finalPlan: currentPlan,
+          finalScore: combinedScore,
+          bestPlan: currentPlan,
+          bestScore: combinedScore,
+          bestIteration: iteration,
+          iterations,
+          totalIterations: iteration,
+          finalConcerns: allConcerns,
+          finalRecommendations: allRecommendations,
+          arbitrated: false,
+          // Fullstack-specific fields
+          appScores: currentAppScores,
+          appApproved: {
+            frontend: feApproved,
+            backend: beApproved,
+            unified: true,
+          },
+          taggedConcerns: allTaggedConcerns,
+          taggedRecommendations: allTaggedRecommendations,
+          corrections,
+        } as FullstackConsensusProcessResult;
+      }
 
       return {
         approved: true,
@@ -943,19 +1299,50 @@ export async function runOptimizedConsensusProcess(
       onProgress?.('consensus', `Consensus stuck - invoking ${arbitrator} for arbitration`);
 
       try {
-        const arbitrationResult = await requestGeminiArbitration(
+        const arbitrationResult = await requestArbitratorDecision(
           bestPlan,
           combinedAnalysis,
           `Stuck after ${iteration} iterations. Scores: ${scores.slice(-stuckIterations).join(', ')}`,
           iteration,
-          scores
+          scores,
+          arbitrator
         );
 
         if (onArbitration) onArbitration(arbitrationResult);
 
         if (arbitrationResult.approved || arbitrationResult.score >= arbitrationThreshold) {
           onProgress?.('arbitration', `Arbitrator approved with ${arbitrationResult.score}%`);
-          await planStorage.updateStatus('approved', milestoneId, taskId);
+          await planStorage.updateStatus('approved', taskId ? 'task' : 'milestone', milestoneId, taskId);
+
+          if (isFullstack) {
+            const feApproved = (currentAppScores.frontend || 0) >= arbitrationThreshold;
+            const beApproved = (currentAppScores.backend || 0) >= arbitrationThreshold;
+
+            return {
+              approved: true,
+              finalPlan: bestPlan,
+              finalScore: arbitrationResult.score,
+              bestPlan,
+              bestScore: arbitrationResult.score,
+              bestIteration,
+              iterations,
+              totalIterations: iteration,
+              finalConcerns: arbitrationResult.minorConcerns || allConcerns,
+              finalRecommendations: arbitrationResult.suggestedChanges || allRecommendations,
+              arbitrated: true,
+              arbitrationResult,
+              // Fullstack-specific fields
+              appScores: currentAppScores,
+              appApproved: {
+                frontend: feApproved,
+                backend: beApproved,
+                unified: true,
+              },
+              taggedConcerns: allTaggedConcerns,
+              taggedRecommendations: allTaggedRecommendations,
+              corrections,
+            } as FullstackConsensusProcessResult;
+          }
 
           return {
             approved: true,
@@ -992,6 +1379,7 @@ export async function runOptimizedConsensusProcess(
         currentPlan,
         combinedAnalysis,
         allConcerns,
+        language,
         revisionProgress
       );
 
@@ -1015,7 +1403,49 @@ export async function runOptimizedConsensusProcess(
   }
 
   // Max iterations reached
-  await planStorage.updateStatus('reviewing', milestoneId, taskId);
+  await planStorage.updateStatus('reviewing', taskId ? 'task' : 'milestone', milestoneId, taskId);
+
+  // Final per-app scores from history
+  const finalAppScores: AppConsensusScores = isFullstack ? {
+    frontend: appScoresHistory.frontend.length > 0
+      ? appScoresHistory.frontend[appScoresHistory.frontend.length - 1]
+      : undefined,
+    backend: appScoresHistory.backend.length > 0
+      ? appScoresHistory.backend[appScoresHistory.backend.length - 1]
+      : undefined,
+    unified: appScoresHistory.unified.length > 0
+      ? appScoresHistory.unified[appScoresHistory.unified.length - 1]
+      : bestScore,
+  } : { unified: bestScore };
+
+  if (isFullstack) {
+    const feApproved = (finalAppScores.frontend || 0) >= threshold;
+    const beApproved = (finalAppScores.backend || 0) >= threshold;
+
+    return {
+      approved: false,
+      finalPlan: bestPlan,
+      finalScore: bestScore,
+      bestPlan,
+      bestScore,
+      bestIteration,
+      iterations,
+      totalIterations: iteration,
+      finalConcerns: lastConcerns,
+      finalRecommendations: lastRecommendations,
+      arbitrated: false,
+      // Fullstack-specific fields
+      appScores: finalAppScores,
+      appApproved: {
+        frontend: feApproved,
+        backend: beApproved,
+        unified: bestScore >= threshold,
+      },
+      taggedConcerns: allTaggedConcerns,
+      taggedRecommendations: allTaggedRecommendations,
+      corrections,
+    } as FullstackConsensusProcessResult;
+  }
 
   return {
     approved: false,

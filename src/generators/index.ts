@@ -1,6 +1,6 @@
 /**
  * Project generators module
- * Provides unified API for generating Python and TypeScript projects
+ * Provides unified API for generating Python, TypeScript, and Fullstack projects
  */
 
 import type { ProjectSpec, OutputLanguage } from '../types/project.js';
@@ -17,6 +17,11 @@ import {
   addTypeScriptModule,
   getTypeScriptProjectFiles,
 } from './typescript.js';
+import {
+  generateFullstackProject,
+  validateFullstackProject,
+  getFullstackProjectFiles,
+} from './fullstack.js';
 
 // Re-export (explicitly to avoid name conflicts)
 export {
@@ -25,6 +30,7 @@ export {
   addPythonModule,
   getPythonProjectFiles,
   type GenerationResult,
+  type PythonGeneratorOptions,
 } from './python.js';
 export {
   generateTypeScriptProject,
@@ -33,7 +39,13 @@ export {
   getTypeScriptProjectFiles,
   addDependency,
   updateScripts,
+  type TypeScriptGeneratorOptions,
 } from './typescript.js';
+export {
+  generateFullstackProject,
+  validateFullstackProject,
+  getFullstackProjectFiles,
+} from './fullstack.js';
 export * from './templates/index.js';
 
 /**
@@ -52,6 +64,8 @@ export async function generateProject(
       return generatePythonProject(spec, outputDir);
     case 'typescript':
       return generateTypeScriptProject(spec, outputDir);
+    case 'fullstack':
+      return generateFullstackProject(spec, outputDir);
     default:
       return {
         success: false,
@@ -81,6 +95,8 @@ export async function validateProject(
       return validatePythonProject(projectDir);
     case 'typescript':
       return validateTypeScriptProject(projectDir);
+    case 'fullstack':
+      return validateFullstackProject(projectDir);
     default:
       return {
         valid: false,
@@ -125,6 +141,8 @@ export function getProjectFiles(projectName: string, language: OutputLanguage): 
       return getPythonProjectFiles(projectName);
     case 'typescript':
       return getTypeScriptProjectFiles(projectName);
+    case 'fullstack':
+      return getFullstackProjectFiles(projectName);
     default:
       return [];
   }
@@ -142,6 +160,8 @@ export function getTestCommand(language: OutputLanguage): string {
       return 'python -m pytest tests/ -v';
     case 'typescript':
       return 'npm test';
+    case 'fullstack':
+      return 'cd apps/backend && pytest && cd ../frontend && npm test';
     default:
       return 'echo "No test command configured"';
   }
@@ -159,6 +179,8 @@ export function getBuildCommand(language: OutputLanguage): string {
       return 'python -m pip install -e .';
     case 'typescript':
       return 'npm run build';
+    case 'fullstack':
+      return 'cd apps/backend && pip install -e . && cd ../frontend && npm run build';
     default:
       return 'echo "No build command configured"';
   }
@@ -176,6 +198,8 @@ export function getLintCommand(language: OutputLanguage): string {
       return 'ruff check src/ tests/';
     case 'typescript':
       return 'npm run lint';
+    case 'fullstack':
+      return 'cd apps/backend && ruff check . && cd ../frontend && npm run lint';
     default:
       return 'echo "No lint command configured"';
   }

@@ -1,6 +1,6 @@
 /**
  * Authentication commands
- * Handles login, logout, and status for Claude and OpenAI
+ * Handles login, logout, and status for Claude, OpenAI, Gemini, and Grok
  */
 
 import { Command } from 'commander';
@@ -11,6 +11,8 @@ import {
   isAuthenticated,
 } from '../../auth/index.js';
 import { authenticateOpenAIWithKey } from '../../auth/openai.js';
+import { authenticateGeminiWithKey } from '../../auth/gemini.js';
+import { authenticateGrokWithKey } from '../../auth/grok.js';
 import {
   printHeader,
   printAuthStatus,
@@ -46,6 +48,9 @@ export function createAuthCommand(): Command {
           console.log();
           printInfo('Run "popeye-cli auth login" to authenticate missing services.');
         }
+        if (status.grok && !status.grok.authenticated) {
+          printInfo('Run "popeye-cli auth grok" to authenticate Grok (optional).');
+        }
       } catch (error) {
         failSpinner('Failed to check status');
         printError(error instanceof Error ? error.message : 'Unknown error');
@@ -57,12 +62,12 @@ export function createAuthCommand(): Command {
   auth
     .command('login')
     .description('Authenticate with services')
-    .argument('[service]', 'Service to authenticate (claude, openai, all)', 'all')
-    .option('--api-key <key>', 'OpenAI API key (for openai service)')
-    .action(async (service: 'claude' | 'openai' | 'all', options) => {
+    .argument('[service]', 'Service to authenticate (claude, openai, gemini, grok, all)', 'all')
+    .option('--api-key <key>', 'API key (for openai, gemini, or grok service)')
+    .action(async (service: 'claude' | 'openai' | 'gemini' | 'grok' | 'all', options) => {
       // Validate service
-      if (!['claude', 'openai', 'all'].includes(service)) {
-        printError(`Invalid service: ${service}. Use 'claude', 'openai', or 'all'.`);
+      if (!['claude', 'openai', 'gemini', 'grok', 'all'].includes(service)) {
+        printError(`Invalid service: ${service}. Use 'claude', 'openai', 'gemini', 'grok', or 'all'.`);
         process.exit(1);
       }
 
@@ -113,11 +118,11 @@ export function createAuthCommand(): Command {
   auth
     .command('logout')
     .description('Remove stored credentials')
-    .argument('[service]', 'Service to logout from (claude, openai, all)', 'all')
-    .action(async (service: 'claude' | 'openai' | 'all') => {
+    .argument('[service]', 'Service to logout from (claude, openai, gemini, grok, all)', 'all')
+    .action(async (service: 'claude' | 'openai' | 'gemini' | 'grok' | 'all') => {
       // Validate service
-      if (!['claude', 'openai', 'all'].includes(service)) {
-        printError(`Invalid service: ${service}. Use 'claude', 'openai', or 'all'.`);
+      if (!['claude', 'openai', 'gemini', 'grok', 'all'].includes(service)) {
+        printError(`Invalid service: ${service}. Use 'claude', 'openai', 'gemini', 'grok', or 'all'.`);
         process.exit(1);
       }
 
@@ -186,6 +191,80 @@ export function createAuthCommand(): Command {
         printSuccess('OpenAI API authenticated!');
       } else {
         printError('OpenAI API authentication failed');
+        process.exit(1);
+      }
+    });
+
+  // Gemini-specific subcommand
+  auth
+    .command('gemini')
+    .description('Authenticate with Gemini API')
+    .option('--api-key <key>', 'Gemini API key')
+    .action(async (options) => {
+      printHeader('Gemini API Authentication');
+
+      if (options.apiKey) {
+        startSpinner('Validating API key...');
+        const success = await authenticateGeminiWithKey(options.apiKey);
+
+        if (success) {
+          succeedSpinner('Gemini API authenticated!');
+        } else {
+          failSpinner('Invalid API key');
+          process.exit(1);
+        }
+        return;
+      }
+
+      const alreadyAuth = await isAuthenticated('gemini');
+      if (alreadyAuth) {
+        printInfo('Already authenticated with Gemini API');
+        return;
+      }
+
+      const success = await authenticateService('gemini');
+
+      if (success) {
+        printSuccess('Gemini API authenticated!');
+      } else {
+        printError('Gemini API authentication failed');
+        process.exit(1);
+      }
+    });
+
+  // Grok-specific subcommand
+  auth
+    .command('grok')
+    .description('Authenticate with xAI Grok API')
+    .option('--api-key <key>', 'Grok API key')
+    .action(async (options) => {
+      printHeader('Grok API Authentication');
+
+      if (options.apiKey) {
+        startSpinner('Validating API key...');
+        const success = await authenticateGrokWithKey(options.apiKey);
+
+        if (success) {
+          succeedSpinner('Grok API authenticated!');
+        } else {
+          failSpinner('Invalid API key');
+          process.exit(1);
+        }
+        return;
+      }
+
+      const alreadyAuth = await isAuthenticated('grok');
+      if (alreadyAuth) {
+        printInfo('Already authenticated with Grok API');
+        return;
+      }
+
+      const success = await authenticateService('grok');
+
+      if (success) {
+        printSuccess('Grok API authenticated!');
+      } else {
+        printError('Grok API authentication failed');
         process.exit(1);
       }
     });

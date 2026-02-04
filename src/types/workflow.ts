@@ -26,6 +26,16 @@ export const TaskStatusSchema = z.enum(['pending', 'in-progress', 'complete', 'f
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
 /**
+ * Per-app consensus tracking (for fullstack projects)
+ */
+export interface AppConsensusTracking {
+  score?: number;
+  iterations?: number;
+  approved?: boolean;
+  feedbackDoc?: string;  // Path to app-specific feedback
+}
+
+/**
  * Individual task within a milestone
  */
 export interface Task {
@@ -44,7 +54,25 @@ export interface Task {
   planDoc?: string;                 // Path to task plan document
   testResultsDoc?: string;          // Path to test results document
   implementationComplete?: boolean; // Whether code implementation finished (for resume)
+
+  // Per-app consensus tracking (fullstack projects)
+  frontendConsensus?: AppConsensusTracking;
+  backendConsensus?: AppConsensusTracking;
+  unifiedConsensus?: AppConsensusTracking;
+
+  // App target (which app this task affects)
+  appTarget?: 'frontend' | 'backend' | 'unified';
 }
+
+/**
+ * Zod schema for per-app consensus tracking
+ */
+export const AppConsensusTrackingSchema = z.object({
+  score: z.number().optional(),
+  iterations: z.number().optional(),
+  approved: z.boolean().optional(),
+  feedbackDoc: z.string().optional(),
+});
 
 /**
  * Zod schema for Task
@@ -64,6 +92,11 @@ export const TaskSchema = z.object({
   planDoc: z.string().optional(),
   testResultsDoc: z.string().optional(),
   implementationComplete: z.boolean().optional(),
+  // Per-app consensus tracking (fullstack)
+  frontendConsensus: AppConsensusTrackingSchema.optional(),
+  backendConsensus: AppConsensusTrackingSchema.optional(),
+  unifiedConsensus: AppConsensusTrackingSchema.optional(),
+  appTarget: z.enum(['frontend', 'backend', 'unified']).optional(),
 });
 
 /**
@@ -80,12 +113,24 @@ export interface Milestone {
   consensusScore?: number;          // Consensus score for milestone plan
   consensusIterations?: number;     // Number of iterations to reach consensus
   consensusApproved?: boolean;      // Whether milestone plan was approved
-  planDoc?: string;                 // Path: docs/milestone_N_plan.md
+  planDoc?: string;                 // Path: docs/plans/milestone-N/plan.md
   // Milestone completion review
   completionReview?: string;        // Code review and summary
   completionScore?: number;         // Consensus score for completion
   completionApproved?: boolean;     // Whether milestone completion was approved
   completionDoc?: string;           // Path: docs/milestone_N_complete.md
+
+  // Per-app consensus tracking (fullstack projects)
+  frontendConsensus?: AppConsensusTracking;
+  backendConsensus?: AppConsensusTracking;
+  unifiedConsensus?: AppConsensusTracking;
+
+  // Feedback document paths (fullstack - separate by app)
+  feedbackDocs?: {
+    frontend?: string;  // docs/plans/milestone-N/frontend/feedback.md
+    backend?: string;   // docs/plans/milestone-N/backend/feedback.md
+    unified?: string;   // docs/plans/milestone-N/unified/feedback.md
+  };
 }
 
 /**
@@ -106,6 +151,15 @@ export const MilestoneSchema = z.object({
   completionScore: z.number().optional(),
   completionApproved: z.boolean().optional(),
   completionDoc: z.string().optional(),
+  // Per-app consensus tracking (fullstack)
+  frontendConsensus: AppConsensusTrackingSchema.optional(),
+  backendConsensus: AppConsensusTrackingSchema.optional(),
+  unifiedConsensus: AppConsensusTrackingSchema.optional(),
+  feedbackDocs: z.object({
+    frontend: z.string().optional(),
+    backend: z.string().optional(),
+    unified: z.string().optional(),
+  }).optional(),
 });
 
 /**
@@ -137,7 +191,7 @@ export const ProjectStateSchema = z.object({
   id: z.string(),
   name: z.string(),
   idea: z.string(),
-  language: z.enum(['python', 'typescript']),
+  language: z.enum(['python', 'typescript', 'fullstack']),
   openaiModel: z.enum(['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini']),
   phase: WorkflowPhaseSchema,
   status: ProjectStatusSchema,

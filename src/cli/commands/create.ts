@@ -35,7 +35,7 @@ export function createCreateCommand(): Command {
     .option('-n, --name <name>', 'Project name')
     .option(
       '-l, --language <lang>',
-      'Output language (python, typescript)',
+      'Output language (python, typescript, fullstack)',
       'python'
     )
     .option(
@@ -66,8 +66,8 @@ export function createCreateCommand(): Command {
       try {
         // Validate inputs
         const language = options.language as OutputLanguage;
-        if (!['python', 'typescript'].includes(language)) {
-          printError(`Invalid language: ${language}. Use 'python' or 'typescript'.`);
+        if (!['python', 'typescript', 'fullstack'].includes(language)) {
+          printError(`Invalid language: ${language}. Use 'python', 'typescript', or 'fullstack'.`);
           process.exit(1);
         }
 
@@ -192,7 +192,16 @@ export function createCreateCommand(): Command {
           printSuccess('Your project is ready!');
           console.log();
           printInfo(`cd ${projectDir}`);
-          printInfo(language === 'python' ? 'python -m pytest tests/' : 'npm test');
+          if (language === 'python') {
+            printInfo('python -m pytest tests/');
+          } else if (language === 'typescript') {
+            printInfo('npm test');
+          } else if (language === 'fullstack') {
+            printInfo('docker-compose up  # Run both frontend and backend');
+            printInfo('# Or run separately:');
+            printInfo('cd apps/frontend && npm install && npm run dev');
+            printInfo('cd apps/backend && pip install -e . && uvicorn src.backend.main:app --reload');
+          }
         } else {
           printHeader('Project Creation Failed');
 

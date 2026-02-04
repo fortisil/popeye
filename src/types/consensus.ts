@@ -9,12 +9,22 @@ import type { OpenAIModel } from './project.js';
 /**
  * Supported AI providers for reviews and arbitration
  */
-export type AIProvider = 'openai' | 'gemini';
+export type AIProvider = 'openai' | 'gemini' | 'grok';
 
 /**
  * Supported Gemini models
  */
 export type GeminiModel = 'gemini-2.0-flash' | 'gemini-1.5-pro' | 'gemini-1.5-flash';
+
+/**
+ * Grok model type (flexible string - API evolves fast)
+ */
+export type GrokModel = string;
+
+/**
+ * Default Grok model
+ */
+export const DEFAULT_GROK_MODEL = 'grok-3';
 
 /**
  * Result of a consensus review from OpenAI or Gemini
@@ -62,8 +72,10 @@ export interface ConsensusConfig {
   maxIterations: number;
   openaiKey?: string;
   geminiKey?: string;
+  grokKey?: string;
   openaiModel: OpenAIModel;
   geminiModel: GeminiModel;
+  grokModel: GrokModel;
   reviewer: AIProvider;
   arbitrator: AIProvider;
   enableArbitration: boolean;
@@ -81,11 +93,12 @@ export interface ConsensusConfig {
 /**
  * Default consensus configuration
  */
-export const DEFAULT_CONSENSUS_CONFIG: Omit<ConsensusConfig, 'openaiKey' | 'geminiKey'> = {
+export const DEFAULT_CONSENSUS_CONFIG: Omit<ConsensusConfig, 'openaiKey' | 'geminiKey' | 'grokKey'> = {
   threshold: 95,
   maxIterations: 10,
   openaiModel: 'gpt-4o',
   geminiModel: 'gemini-2.0-flash',
+  grokModel: DEFAULT_GROK_MODEL,
   reviewer: 'openai',
   arbitrator: 'gemini',
   enableArbitration: true,
@@ -99,12 +112,17 @@ export const DEFAULT_CONSENSUS_CONFIG: Omit<ConsensusConfig, 'openaiKey' | 'gemi
 /**
  * Zod schema for AI provider
  */
-export const AIProviderSchema = z.enum(['openai', 'gemini']);
+export const AIProviderSchema = z.enum(['openai', 'gemini', 'grok']);
 
 /**
  * Zod schema for Gemini model
  */
 export const GeminiModelSchema = z.enum(['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash']);
+
+/**
+ * Zod schema for Grok model (flexible string)
+ */
+export const GrokModelSchema = z.string().default(DEFAULT_GROK_MODEL);
 
 /**
  * Zod schema for consensus config validation
@@ -114,8 +132,10 @@ export const ConsensusConfigSchema = z.object({
   maxIterations: z.number().min(1).max(20).default(10),
   openaiKey: z.string().optional(),
   geminiKey: z.string().optional(),
+  grokKey: z.string().optional(),
   openaiModel: z.enum(['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini']),
   geminiModel: GeminiModelSchema.default('gemini-2.0-flash'),
+  grokModel: GrokModelSchema.default(DEFAULT_GROK_MODEL),
   reviewer: AIProviderSchema.default('openai'),
   arbitrator: AIProviderSchema.default('gemini'),
   enableArbitration: z.boolean().default(true),
@@ -172,4 +192,116 @@ export interface EscalationDetails {
   lastScore: number;
   unresolvable_concerns: string[];
   suggestedActions: string[];
+}
+
+/**
+ * App target for fullstack reviews
+ */
+export type ReviewAppTarget = 'frontend' | 'backend' | 'unified';
+
+/**
+ * Tagged concern/recommendation with app context
+ */
+export interface TaggedItem {
+  app: ReviewAppTarget;
+  content: string;
+}
+
+/**
+ * Per-app consensus scores for fullstack projects
+ */
+export interface AppConsensusScores {
+  frontend?: number;
+  backend?: number;
+  unified: number;  // Combined/overall score
+}
+
+/**
+ * Per-app feedback for fullstack reviews
+ */
+export interface AppFeedback {
+  app: ReviewAppTarget;
+  score: number;
+  concerns: string[];
+  recommendations: string[];
+  analysis: string;
+}
+
+/**
+ * Fullstack-aware consensus result
+ */
+export interface FullstackConsensusResult extends ConsensusResult {
+  /** Per-app breakdown of scores */
+  appScores: AppConsensusScores;
+  /** Concerns tagged by app */
+  taggedConcerns: TaggedItem[];
+  /** Recommendations tagged by app */
+  taggedRecommendations: TaggedItem[];
+  /** Per-app feedback breakdown */
+  appFeedback: AppFeedback[];
+  /** Whether this is a fullstack project review */
+  isFullstack: boolean;
+}
+
+/**
+ * Fullstack consensus iteration with per-app tracking
+ */
+export interface FullstackConsensusIteration extends ConsensusIteration {
+  /** Per-app scores for this iteration */
+  appScores?: AppConsensusScores;
+  /** Per-app approval status */
+  appApproved?: {
+    frontend?: boolean;
+    backend?: boolean;
+    unified: boolean;
+  };
+}
+
+/**
+ * Correction/revision record for tracking all changes
+ */
+export interface CorrectionRecord {
+  id: string;
+  timestamp: string;
+  app: ReviewAppTarget;
+  previousScore: number;
+  newScore: number;
+  concerns: string[];
+  changes: string[];
+  reviewer: AIProvider;
+}
+
+/**
+ * Complete consensus tracking for a plan level (master/milestone/task)
+ */
+export interface ConsensusTrackingRecord {
+  planLevel: 'master' | 'milestone' | 'task';
+  planId: string;
+  milestoneName?: string;
+  taskName?: string;
+  isFullstack: boolean;
+
+  /** Overall consensus status */
+  overallScore: number;
+  overallApproved: boolean;
+  totalIterations: number;
+
+  /** Per-app consensus status (fullstack only) */
+  frontendScore?: number;
+  frontendApproved?: boolean;
+  frontendIterations?: number;
+
+  backendScore?: number;
+  backendApproved?: boolean;
+  backendIterations?: number;
+
+  /** All corrections/revisions made */
+  corrections: CorrectionRecord[];
+
+  /** Timestamps */
+  startedAt: string;
+  completedAt?: string;
+
+  /** Final status */
+  status: 'in-progress' | 'approved' | 'escalated' | 'failed';
 }

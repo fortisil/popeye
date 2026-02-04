@@ -77,8 +77,9 @@ Popeye uses multiple AI systems that must agree before implementation begins:
 - **Claude (via Claude Agent SDK)**: Primary code execution engine that generates plans, implements code, and runs tests
 - **OpenAI GPT-4** (default reviewer): Evaluates plans for completeness, feasibility, and quality
 - **Google Gemini** (optional): Can be configured as reviewer or arbitrator when consensus gets stuck
+- **xAI Grok** (optional): Can be configured as reviewer or arbitrator as an alternative to Gemini
 
-Plans are iteratively refined until systems reach **95%+ consensus**, ensuring well-thought-out implementations. When consensus cannot be reached, an arbitrator (Gemini by default) makes the final decision.
+Plans are iteratively refined until systems reach **95%+ consensus**, ensuring well-thought-out implementations. When consensus cannot be reached, an arbitrator (configurable) makes the final decision.
 
 ---
 
@@ -256,6 +257,7 @@ claude --version
 | **OpenAI API Key** | Yes | Plan review and consensus (default reviewer) |
 | **Claude Auth** | Yes | Code generation (via Claude Code CLI) |
 | **Gemini API Key** | Optional | Alternative reviewer or arbitrator |
+| **Grok API Key** | Optional | Alternative reviewer or arbitrator (xAI) |
 
 ## Installation
 
@@ -294,6 +296,9 @@ popeye auth openai
 
 # Set up Gemini API key (optional - for arbitration or alternative reviewer)
 popeye auth gemini
+
+# Set up Grok API key (optional - alternative to Gemini)
+popeye auth grok
 ```
 
 ### 2. Create a Project
@@ -304,6 +309,9 @@ popeye create "A REST API for managing todo items with SQLite storage" --languag
 
 # Create a TypeScript project
 popeye create "A React component library for data visualization" --language typescript
+
+# Create a Fullstack project (React frontend + FastAPI backend)
+popeye create "A task management app with user authentication" --language fullstack
 ```
 
 ### 3. Monitor Progress
@@ -338,7 +346,7 @@ Popeye provides real-time feedback:
 
 - **Fully Autonomous**: Runs from idea to complete project without manual intervention
 - **Dual-AI Consensus**: Plans validated by multiple AI systems before execution
-- **Multi-Language Support**: Generate projects in Python or TypeScript
+- **Multi-Language Support**: Generate projects in Python, TypeScript, or Fullstack (React + FastAPI)
 - **Automatic Testing**: Tests are generated and run for each implementation
 - **Error Recovery**: Failed tests trigger automatic fix attempts (up to 3 retries)
 - **Auto-Generated README**: At project completion, generates a comprehensive README with:
@@ -370,6 +378,36 @@ Popeye automatically handles all UI/UX decisions, eliminating the need for manua
 
 The UI design specification is saved to `.popeye/ui-spec.json` and is used to guide all code generation, ensuring consistent styling throughout the project.
 
+### Fullstack Project Support
+
+Popeye supports generating complete fullstack applications with coordinated frontend and backend development:
+
+- **Frontend Stack**: React 18 + Vite 5 + TypeScript + Tailwind CSS + shadcn/ui + Vitest
+- **Backend Stack**: FastAPI (Python) + PostgreSQL
+- **Monorepo Structure**: `apps/frontend/` and `apps/backend/` directories
+- **App-Aware Planning**: Tasks are tagged with `[FE]`, `[BE]`, or `[INT]` for frontend, backend, and integration work
+- **Coordinated Development**: Plans ensure proper sequencing of frontend and backend tasks
+- **Integration Testing**: Dedicated integration tasks ensure frontend and backend work together
+
+Example fullstack task in a plan:
+```markdown
+#### Task 1.1 [FE]: Create user login form
+**App**: frontend
+**Files**:
+- `apps/frontend/src/components/LoginForm.tsx`
+- `apps/frontend/src/pages/Login.tsx`
+
+#### Task 1.2 [BE]: Implement authentication endpoint
+**App**: backend
+**Files**:
+- `apps/backend/src/api/routes/auth.py`
+- `apps/backend/src/models/user.py`
+
+#### Task 1.3 [INT]: Connect login form to auth API
+**App**: unified
+**Dependencies**: Task 1.1, Task 1.2
+```
+
 ### Reliability Features
 
 - **Rate Limit Handling**: Automatically waits and retries when API rate limits are hit
@@ -377,14 +415,22 @@ The UI design specification is saved to `.popeye/ui-spec.json` and is used to gu
   - Distinguishes actual rate limit errors from plan content mentioning "rate limits"
   - Parses reset times from error messages (e.g., "resets 3pm")
   - Extracts clean error messages without including extraneous plan content
-  - Configurable wait times (default: 5 min base, 2 hour max)
-  - Up to 5 retry attempts before failing
+  - Configurable wait times (default: 1 min base, **10 min max**)
+  - Up to 3 retry attempts before failing gracefully
+  - **Capped wait time**: Will not wait longer than 10 minutes; fails with helpful message if reset time is too far
   - Progress updates during wait periods
 
 - **Resume Capability**: Resume interrupted projects from where they left off
   - State persisted in `.popeye/state.json`
   - Tracks completed milestones and tasks
   - Survives crashes, rate limits, and manual interruptions
+  - Automatically loads `popeye.md` configuration on resume
+
+- **Smart Project Naming**: Generates meaningful project names from your idea
+  - Detects explicit project names (e.g., "planning Gateco" becomes `gateco`)
+  - Recognizes CamelCase names (e.g., "TodoMaster" becomes `todo-master`)
+  - Filters out action verbs like "read", "start", "planning"
+  - Falls back to extracting key nouns from the description
 
 - **Plan File Extraction**: Handles various Claude response formats
   - Detects when Claude saves plans to `~/.claude/plans/`
@@ -502,18 +548,80 @@ popeye
 
 **Available Commands:**
 ```
-/help              Show available commands
-/create <idea>     Start a new project
-/status            Check current project status
-/resume            Resume interrupted project
-/auth              Manage authentication
-/config            View/edit configuration
-/exit              Exit interactive mode
+/help                      Show available commands
+/create <idea>             Start a new project
+/new <idea>                Force create new project (skips existing check)
+/status                    Check current project status
+/resume                    Resume interrupted project
+/auth                      Manage authentication
+/config                    View/edit configuration
+/config reviewer <ai>      Set reviewer (openai/gemini/grok)
+/config arbitrator <ai>    Set arbitrator (openai/gemini/grok/off)
+/lang <lang>               Set language (py/ts/fs or python/typescript/fullstack)
+/info                      Show system info (Claude CLI status, API keys, etc.)
+/clear                     Clear screen
+/exit                      Exit interactive mode
 ```
+
+**Language Shortcuts:**
+- `/lang py` or `/lang python` - Python projects
+- `/lang ts` or `/lang typescript` - TypeScript projects
+- `/lang fs` or `/lang fullstack` - Fullstack projects (React + FastAPI)
+
+**Status Bar Indicators:**
+The input box shows current configuration:
+- Language: `py`, `ts`, or `fs`
+- Reviewer: `O` (OpenAI), `G` (Gemini), or `X` (Grok)
+- Arbitrator: `O`, `G`, `X`, or `-` (disabled)
+- Auth status: Filled circle when all required APIs are authenticated
 
 ## Configuration
 
-### Configuration File
+### Project Configuration File (`popeye.md`)
+
+When you create a new project, Popeye automatically generates a `popeye.md` file in the project directory. This file:
+
+- **Persists project settings**: Language, reviewer, and arbitrator choices are saved
+- **Auto-loads on resume**: When you resume a project, settings are restored automatically
+- **Contains project notes**: Add guidance or context for Claude in the Notes section
+- **Tracks session history**: Records when the project was created and last accessed
+
+**Example `popeye.md`:**
+```markdown
+---
+# Popeye Project Configuration
+language: fullstack
+reviewer: openai
+arbitrator: gemini
+created: 2024-01-15T10:30:00.000Z
+lastRun: 2024-01-15T14:45:00.000Z
+projectName: task-manager
+---
+
+# task-manager
+
+## Description
+A task management app with user authentication and real-time updates.
+
+## Notes
+Add any guidance or notes for Claude here...
+- Focus on simplicity
+- Use PostgreSQL for the database
+- Include dark mode support
+
+## Configuration
+- **Language**: fullstack
+- **Reviewer**: openai
+- **Arbitrator**: gemini
+
+## Session History
+- 2024-01-15: Project created
+- 2024-01-15: Last session
+```
+
+This means you no longer need to run `/lang fullstack` every time you resume a project - the configuration is automatically restored.
+
+### Global Configuration File
 
 Create `popeye.config.yaml` in your project or `~/.popeye/config.yaml` globally:
 
@@ -522,8 +630,8 @@ Create `popeye.config.yaml` in your project or `~/.popeye/config.yaml` globally:
 consensus:
   threshold: 95              # Minimum agreement percentage
   max_iterations: 10         # Max revision rounds
-  reviewer: openai           # Primary reviewer (openai or gemini)
-  arbitrator: gemini         # Arbitrator when stuck (openai or gemini)
+  reviewer: openai           # Primary reviewer (openai, gemini, or grok)
+  arbitrator: gemini         # Arbitrator when stuck (openai, gemini, grok, or off)
   enable_arbitration: true   # Enable automatic arbitration
   arbitration_threshold: 85  # Score threshold to trigger arbitration
   stuck_iterations: 3        # Iterations without improvement before arbitration
@@ -540,11 +648,11 @@ apis:
     temperature: 0.3
     max_tokens: 4096
 
-# Rate limit settings (new)
+# Rate limit settings
 rateLimit:
-  maxRetries: 5              # Max retry attempts
-  baseWaitMs: 300000         # 5 minutes base wait
-  maxWaitMs: 7200000         # 2 hours max wait
+  maxRetries: 3              # Max retry attempts
+  baseWaitMs: 60000          # 1 minute base wait
+  maxWaitMs: 600000          # 10 minutes max wait (capped to prevent long waits)
 
 # Project defaults
 project:
@@ -570,17 +678,19 @@ POPEYE_OPENAI_MODEL=gpt-4o         # OpenAI model
 POPEYE_GEMINI_MODEL=gemini-2.0-flash  # Gemini model
 POPEYE_CONSENSUS_THRESHOLD=95      # Consensus threshold (0-100)
 POPEYE_MAX_ITERATIONS=10           # Max iterations before escalation
-POPEYE_REVIEWER=openai             # Primary reviewer (openai or gemini)
-POPEYE_ARBITRATOR=gemini           # Arbitrator (openai or gemini)
+POPEYE_REVIEWER=openai             # Primary reviewer (openai, gemini, or grok)
+POPEYE_ARBITRATOR=gemini           # Arbitrator (openai, gemini, grok, or off)
+POPEYE_GROK_KEY=...                # Grok API key (optional)
 POPEYE_LOG_LEVEL=debug             # Enable verbose logging
 ```
 
 ### Configuration Priority
 
 1. Environment variables (highest)
-2. Project-level `popeye.config.yaml` or `.popeyerc.yaml`
-3. Global `~/.popeye/config.yaml`
-4. Built-in defaults (lowest)
+2. Project-level `popeye.md` (for language, reviewer, arbitrator)
+3. Project-level `popeye.config.yaml` or `.popeyerc.yaml`
+4. Global `~/.popeye/config.yaml`
+5. Built-in defaults (lowest)
 
 ## Generated Project Structure
 
@@ -603,6 +713,7 @@ my-project/
 ├── .gitignore
 ├── .env.example
 ├── Dockerfile
+├── popeye.md                # Project configuration (auto-generated)
 └── .popeye/
     └── state.json           # Project state
 ```
@@ -641,9 +752,57 @@ my-project/
 ├── .gitignore
 ├── .env.example
 ├── Dockerfile
+├── popeye.md              # Project configuration (auto-generated)
 └── .popeye/
     ├── state.json         # Project state
     └── ui-spec.json       # UI design specification
+```
+
+### Fullstack Projects
+
+```
+my-project/
+├── apps/
+│   ├── frontend/              # React + Vite frontend
+│   │   ├── src/
+│   │   │   ├── components/
+│   │   │   │   └── ui/        # shadcn/ui components
+│   │   │   ├── pages/
+│   │   │   ├── hooks/
+│   │   │   ├── lib/
+│   │   │   │   └── utils.ts
+│   │   │   ├── index.css
+│   │   │   └── main.tsx
+│   │   ├── tests/
+│   │   │   └── setup.ts       # Vitest setup
+│   │   ├── tailwind.config.ts
+│   │   ├── vite.config.ts
+│   │   ├── vitest.config.ts
+│   │   └── package.json
+│   │
+│   └── backend/               # FastAPI backend
+│       ├── src/
+│       │   ├── api/
+│       │   │   └── routes/
+│       │   ├── models/
+│       │   ├── services/
+│       │   └── main.py
+│       ├── tests/
+│       │   └── conftest.py
+│       ├── pyproject.toml
+│       └── requirements.txt
+│
+├── docs/
+│   ├── PLAN.md                # Development plan with [FE], [BE], [INT] tags
+│   └── WORKFLOW_LOG.md
+├── README.md
+├── .gitignore
+├── .env.example
+├── docker-compose.yml         # Full stack orchestration
+├── popeye.md                  # Project configuration
+└── .popeye/
+    ├── state.json
+    └── ui-spec.json
 ```
 
 ## UI Design System
@@ -716,11 +875,14 @@ The UI specification is automatically injected into Claude's context when genera
 
 If you see "You've hit your limit" errors:
 
-1. **Automatic Handling**: Popeye automatically waits and retries (up to 5 times)
-2. **Manual Resume**: If Popeye exits, use `popeye resume` to continue
-3. **Check Limits**: Verify your API usage at:
+1. **Automatic Handling**: Popeye automatically waits and retries (up to 3 times)
+2. **Capped Wait Time**: If the reset time is more than 10 minutes away, Popeye will fail gracefully with a "Please try again later" message instead of waiting for hours
+3. **Manual Resume**: If Popeye exits, use `popeye resume` to continue
+4. **Check Limits**: Verify your API usage at:
    - Claude: https://console.anthropic.com
    - OpenAI: https://platform.openai.com/usage
+   - Gemini: https://console.cloud.google.com
+   - Grok: https://console.x.ai
 
 ### Plan Validation Failures
 
@@ -729,6 +891,8 @@ If plans fail validation:
 1. Check `~/.popeye/logs/` for detailed error logs
 2. Ensure your idea is clear and specific enough
 3. Try rephrasing your project description
+
+**Note on False Positives**: Plan validation has been improved to avoid false positives. Phrases like "data is saved to database" in plan content no longer trigger garbage plan detection. Only actual meta-commentary (e.g., Claude describing what it did rather than outputting the plan) triggers validation failures.
 
 ### Authentication Issues
 
@@ -786,7 +950,8 @@ src/
 ├── adapters/             # AI service adapters
 │   ├── claude.ts         # Claude Agent SDK (with rate limiting)
 │   ├── openai.ts         # OpenAI API (default reviewer)
-│   └── gemini.ts         # Google Gemini API (reviewer/arbitrator)
+│   ├── gemini.ts         # Google Gemini API (reviewer/arbitrator)
+│   └── grok.ts           # xAI Grok API (reviewer/arbitrator)
 ├── auth/                 # Authentication
 │   ├── keychain.ts       # Credential storage
 │   └── server.ts         # OAuth callback server

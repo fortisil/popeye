@@ -71,6 +71,10 @@ export interface AuthStatus {
     authenticated: boolean;
     keyLastFour?: string;
   };
+  grok?: {
+    authenticated: boolean;
+    keyLastFour?: string;
+  };
 }
 
 /**

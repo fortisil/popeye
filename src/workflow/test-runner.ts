@@ -37,6 +37,7 @@ export interface TestConfig {
 export const DEFAULT_TEST_COMMANDS: Record<OutputLanguage, string> = {
   python: 'python -m pytest tests/ -v',
   typescript: 'npm test',
+  fullstack: 'npm run test:all',  // Runs both frontend and backend tests via workspace.json
 };
 
 /**
@@ -77,6 +78,12 @@ export function buildTestCommand(config: TestConfig): string {
       }
 
       return parts.join(' ');
+    }
+
+    case 'fullstack': {
+      // Fullstack projects use workspace.json commands
+      // Default to running both frontend and backend tests
+      return 'npm run test:all';
     }
   }
 }
@@ -133,6 +140,38 @@ export function parseTestOutput(output: string, language: OutputLanguage): TestR
       // Extract failed test names
       const failedTestMatches = output.matchAll(/✕\s+(.+)/g);
       for (const match of failedTestMatches) {
+        failedTests.push(match[1].trim());
+      }
+      break;
+    }
+
+    case 'fullstack': {
+      // Fullstack combines pytest and jest output
+      // Parse both formats
+      const pytestMatch = output.match(/(\d+)\s+passed/);
+      const pytestFailedMatch = output.match(/(\d+)\s+failed/);
+      const jestMatch = output.match(/Tests:\s*(?:(\d+)\s+failed,\s*)?(\d+)\s+passed,\s*(\d+)\s+total/);
+
+      if (pytestMatch) {
+        passed += parseInt(pytestMatch[1], 10);
+      }
+      if (pytestFailedMatch) {
+        failed += parseInt(pytestFailedMatch[1], 10);
+      }
+      if (jestMatch) {
+        failed += jestMatch[1] ? parseInt(jestMatch[1], 10) : 0;
+        passed += parseInt(jestMatch[2], 10);
+      }
+
+      total = passed + failed;
+
+      // Extract failed test names from both pytest and jest
+      const pytestFailedMatches = output.matchAll(/FAILED\s+([^\s]+)/g);
+      for (const match of pytestFailedMatches) {
+        failedTests.push(match[1]);
+      }
+      const jestFailedMatches = output.matchAll(/✕\s+(.+)/g);
+      for (const match of jestFailedMatches) {
         failedTests.push(match[1].trim());
       }
       break;
@@ -242,6 +281,48 @@ export async function runTypeScriptTests(
 }
 
 /**
+ * Run fullstack tests (both frontend and backend)
+ *
+ * @param cwd - Working directory
+ * @param config - Test configuration
+ * @returns Combined test result
+ */
+export async function runFullstackTests(
+  cwd: string,
+  config: Partial<TestConfig> = {}
+): Promise<TestResult> {
+  const path = await import('node:path');
+
+  // Run backend tests first
+  const backendCwd = path.join(cwd, 'apps', 'backend');
+  const backendResult = await runPythonTests(backendCwd, config);
+
+  // Run frontend tests
+  const frontendCwd = path.join(cwd, 'apps', 'frontend');
+  const frontendResult = await runTypeScriptTests(frontendCwd, config);
+
+  // Combine results
+  const combinedOutput = `=== Backend Tests ===\n${backendResult.output}\n\n=== Frontend Tests ===\n${frontendResult.output}`;
+
+  return {
+    success: backendResult.success && frontendResult.success,
+    passed: backendResult.passed + frontendResult.passed,
+    failed: backendResult.failed + frontendResult.failed,
+    total: backendResult.total + frontendResult.total,
+    output: combinedOutput,
+    failedTests: [
+      ...(backendResult.failedTests || []).map((t) => `[backend] ${t}`),
+      ...(frontendResult.failedTests || []).map((t) => `[frontend] ${t}`),
+    ].length > 0 ? [
+      ...(backendResult.failedTests || []).map((t) => `[backend] ${t}`),
+      ...(frontendResult.failedTests || []).map((t) => `[frontend] ${t}`),
+    ] : undefined,
+    error: backendResult.error || frontendResult.error,
+    noTestsFound: backendResult.noTestsFound && frontendResult.noTestsFound,
+  };
+}
+
+/**
  * Run tests for a project
  *
  * @param cwd - Working directory
@@ -259,6 +340,8 @@ export async function runTests(
       return runPythonTests(cwd, config);
     case 'typescript':
       return runTypeScriptTests(cwd, config);
+    case 'fullstack':
+      return runFullstackTests(cwd, config);
   }
 }
 
@@ -317,6 +400,33 @@ export async function testsExist(
             }
           }
         }
+      }
+
+      case 'fullstack': {
+        // Check for tests in both frontend and backend
+        const backendTestsDir = path.join(cwd, 'apps', 'backend', 'tests');
+        const frontendTestsDir = path.join(cwd, 'apps', 'frontend', 'src');
+
+        let hasBackendTests = false;
+        let hasFrontendTests = false;
+
+        try {
+          await fs.access(backendTestsDir);
+          hasBackendTests = true;
+        } catch {
+          // No backend tests directory
+        }
+
+        try {
+          const files = await fs.readdir(frontendTestsDir, { recursive: true });
+          hasFrontendTests = files.some(
+            (f) => f.toString().endsWith('.test.ts') || f.toString().endsWith('.spec.ts')
+          );
+        } catch {
+          // No frontend test files
+        }
+
+        return hasBackendTests || hasFrontendTests;
       }
     }
   } catch {

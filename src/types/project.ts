@@ -8,8 +8,89 @@ import { z } from 'zod';
 /**
  * Supported output languages for generated projects
  */
-export const OutputLanguageSchema = z.enum(['python', 'typescript']);
+export const OutputLanguageSchema = z.enum(['python', 'typescript', 'fullstack']);
 export type OutputLanguage = z.infer<typeof OutputLanguageSchema>;
+
+/**
+ * Commands configuration for a workspace app
+ */
+export interface WorkspaceAppCommands {
+  test: string;
+  lint: string;
+  build: string;
+  dev: string;
+  typecheck?: string;
+}
+
+/**
+ * Docker configuration for a workspace app
+ */
+export interface WorkspaceAppDocker {
+  dockerfile: string;
+  imageName: string;
+  context: string;
+}
+
+/**
+ * Single app configuration in a workspace
+ */
+export interface WorkspaceApp {
+  name: string;
+  path: string;
+  language: 'python' | 'typescript';
+  commands: WorkspaceAppCommands;
+  docker?: WorkspaceAppDocker;
+  /** Dependencies on other apps or shared packages */
+  dependsOn?: string[];
+  /** Files to include as context for AI code generation */
+  contextRoots?: string[];
+  /** UI spec path (frontend only) */
+  uiSpec?: string;
+}
+
+/**
+ * Shared configuration in a workspace
+ */
+export interface WorkspaceShared {
+  /** OpenAPI spec path for contract-first development */
+  contracts?: string;
+  /** Generator command for FE client from OpenAPI */
+  contractsGenerator?: string;
+}
+
+/**
+ * Repo-level commands for workspace orchestration
+ */
+export interface WorkspaceCommands {
+  testAll: string;
+  lintAll: string;
+  buildAll: string;
+  devAll?: string;
+}
+
+/**
+ * Docker configuration at workspace level
+ */
+export interface WorkspaceDocker {
+  composePath: string;
+  /** Root-level compose for convenience symlink */
+  rootComposeSymlink?: boolean;
+}
+
+/**
+ * Workspace configuration for fullstack projects
+ */
+export interface WorkspaceConfig {
+  version: '1.0';
+  apps: {
+    frontend?: WorkspaceApp;
+    backend?: WorkspaceApp;
+  };
+  shared?: WorkspaceShared;
+  /** Repo-level commands that orchestrate across apps */
+  commands: WorkspaceCommands;
+  docker: WorkspaceDocker;
+}
 
 /**
  * Supported OpenAI models for consensus reviews

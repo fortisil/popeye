@@ -13,8 +13,8 @@ export const ConsensusSettingsSchema = z.object({
   max_disagreements: z.number().min(1).max(10).default(5),
   escalation_action: z.enum(['pause', 'continue', 'abort']).default('pause'),
   // Reviewer and arbitrator settings (persisted across sessions)
-  reviewer: z.enum(['openai', 'gemini']).default('openai'),
-  arbitrator: z.enum(['openai', 'gemini', 'off']).default('off'),
+  reviewer: z.enum(['openai', 'gemini', 'grok']).default('openai'),
+  arbitrator: z.enum(['openai', 'gemini', 'grok', 'off']).default('off'),
   enable_arbitration: z.boolean().default(false),
 });
 
@@ -40,6 +40,16 @@ export const ClaudeSettingsSchema = z.object({
 });
 
 /**
+ * Grok API settings schema
+ */
+export const GrokSettingsSchema = z.object({
+  model: z.string().default('grok-3'),
+  temperature: z.number().min(0).max(2).default(0.3),
+  max_tokens: z.number().min(100).max(32000).default(4096),
+  api_url: z.string().default('https://api.x.ai/v1'),
+});
+
+/**
  * API configuration schema
  */
 export const APISettingsSchema = z.object({
@@ -51,6 +61,12 @@ export const APISettingsSchema = z.object({
   }),
   claude: ClaudeSettingsSchema.default({
     model: 'claude-sonnet-4-20250514',
+  }),
+  grok: GrokSettingsSchema.default({
+    model: 'grok-3',
+    temperature: 0.3,
+    max_tokens: 4096,
+    api_url: 'https://api.x.ai/v1',
   }),
 });
 
@@ -76,7 +92,7 @@ export const TypeScriptSettingsSchema = z.object({
  * Project defaults schema
  */
 export const ProjectSettingsSchema = z.object({
-  default_language: z.enum(['python', 'typescript']).default('python'),
+  default_language: z.enum(['python', 'typescript', 'fullstack']).default('python'),
   python: PythonSettingsSchema.default({
     package_manager: 'pip',
     test_framework: 'pytest',
@@ -129,6 +145,12 @@ export const ConfigSchema = z.object({
     },
     claude: {
       model: 'claude-sonnet-4-20250514',
+    },
+    grok: {
+      model: 'grok-3',
+      temperature: 0.3,
+      max_tokens: 4096,
+      api_url: 'https://api.x.ai/v1',
     },
   }),
   project: ProjectSettingsSchema.default({

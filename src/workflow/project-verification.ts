@@ -289,7 +289,7 @@ async function verifyRouteCompleteness(projectDir: string): Promise<Verification
 
   // Check all page components
   const pageFiles = await findFiles(path.join(frontendDir, 'src', 'pages'), /\.tsx$/);
-  let incompletePages: string[] = [];
+  const incompletePages: string[] = [];
 
   for (const file of pageFiles) {
     const content = await readFile(file);

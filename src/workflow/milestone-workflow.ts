@@ -112,7 +112,7 @@ For each task, provide:
 This plan will be reviewed for consensus before any implementation begins.
 `.trim();
 
-  const result = await claudeCreatePlan(prompt, context, onProgress);
+  const result = await claudeCreatePlan(prompt, context, state.language, onProgress);
 
   if (!result.success) {
     throw new Error(`Failed to create milestone plan: ${result.error}`);
@@ -231,7 +231,7 @@ Please provide:
 Provide a CONSENSUS SCORE (0-100%) indicating confidence that this milestone is complete.
 `.trim();
 
-  const result = await claudeCreatePlan(prompt, context, onProgress);
+  const result = await claudeCreatePlan(prompt, context, state.language, onProgress);
 
   if (!result.success) {
     throw new Error(`Failed to create milestone review: ${result.error}`);

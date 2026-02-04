@@ -90,7 +90,7 @@ Please provide:
 Be specific and actionable. This plan will be reviewed for consensus before implementation.
 `.trim();
 
-  const result = await claudeCreatePlan(prompt, context, onProgress);
+  const result = await claudeCreatePlan(prompt, context, state.language, onProgress);
 
   if (!result.success) {
     throw new Error(`Failed to create task plan: ${result.error}`);
@@ -329,6 +329,7 @@ Task: ${task.name}
             taskId: task.id,
             taskName: task.name,
             parallelReviews: true,
+            isFullstack: state.language === 'fullstack',
             onIteration: (iteration, result) => {
               onProgress?.('task-consensus', `Iteration ${iteration}: ${result.score}%`);
             },
@@ -343,6 +344,8 @@ Task: ${task.name}
           {
             projectDir,
             config: consensusConfig,
+            isFullstack: state.language === 'fullstack',
+            language: state.language,
             onIteration: (iteration, result) => {
               onProgress?.('task-consensus', `Iteration ${iteration}: ${result.score}%`);
             },

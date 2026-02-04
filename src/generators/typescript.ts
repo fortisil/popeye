@@ -32,6 +32,24 @@ export interface GenerationResult {
 }
 
 /**
+ * TypeScript generator options for workspace/monorepo support
+ */
+export interface TypeScriptGeneratorOptions {
+  /** Base directory for project (defaults to outputDir/projectName) */
+  baseDir?: string;
+  /** Override auto-derived package name */
+  packageName?: string;
+  /** Adjust paths for monorepo structure */
+  workspaceMode?: boolean;
+  /** Skip Docker files (fullstack uses root docker-compose) */
+  skipDocker?: boolean;
+  /** Skip README (fullstack has root README) */
+  skipReadme?: boolean;
+  /** Generate frontend project (React + Vite + Tailwind) instead of Node.js */
+  frontend?: boolean;
+}
+
+/**
  * Create a directory if it doesn't exist
  */
 async function ensureDir(dirPath: string): Promise<void> {
@@ -50,14 +68,28 @@ async function writeFile(filePath: string, content: string): Promise<void> {
  *
  * @param spec - Project specification
  * @param outputDir - Output directory
+ * @param options - Generator options for workspace/monorepo support
  * @returns Generation result
  */
 export async function generateTypeScriptProject(
   spec: ProjectSpec,
-  outputDir: string
+  outputDir: string,
+  options: TypeScriptGeneratorOptions = {}
 ): Promise<GenerationResult> {
+  const {
+    baseDir,
+    packageName: customPackageName,
+    workspaceMode = false,
+    skipDocker = false,
+    skipReadme = false,
+    // frontend option reserved for future frontend-specific generation
+  } = options;
+
   const projectName = spec.name || 'my-project';
-  const projectDir = path.join(outputDir, projectName);
+  const packageJsonName = customPackageName || projectName;
+
+  // In workspace mode with baseDir, use it directly; otherwise create subdirectory
+  const projectDir = baseDir || path.join(outputDir, projectName);
   const filesCreated: string[] = [];
 
   try {
@@ -65,15 +97,19 @@ export async function generateTypeScriptProject(
     await ensureDir(projectDir);
     await ensureDir(path.join(projectDir, 'src'));
     await ensureDir(path.join(projectDir, 'tests'));
-    await ensureDir(path.join(projectDir, 'data'));
-    await ensureDir(path.join(projectDir, 'docs'));
+
+    // Only create data/docs dirs in standalone mode
+    if (!workspaceMode) {
+      await ensureDir(path.join(projectDir, 'data'));
+      await ensureDir(path.join(projectDir, 'docs'));
+    }
 
     // Generate and write files
     const files: Array<{ path: string; content: string }> = [
       // Root files
       {
         path: path.join(projectDir, 'package.json'),
-        content: generatePackageJson(projectName, spec.idea),
+        content: generatePackageJson(packageJsonName, spec.idea),
       },
       {
         path: path.join(projectDir, 'tsconfig.json'),
@@ -99,18 +135,6 @@ export async function generateTypeScriptProject(
         path: path.join(projectDir, '.env.example'),
         content: generateEnvExample(),
       },
-      {
-        path: path.join(projectDir, 'README.md'),
-        content: generateReadme(projectName, spec.idea),
-      },
-      {
-        path: path.join(projectDir, 'Dockerfile'),
-        content: generateDockerfile(projectName),
-      },
-      {
-        path: path.join(projectDir, 'docker-compose.yml'),
-        content: generateDockerCompose(projectName),
-      },
 
       // Source files
       {
@@ -123,13 +147,37 @@ export async function generateTypeScriptProject(
         path: path.join(projectDir, 'tests', 'index.test.ts'),
         content: generateTestFile(projectName),
       },
+    ];
 
-      // Data placeholder
-      {
+    // Add README if not skipped
+    if (!skipReadme) {
+      files.push({
+        path: path.join(projectDir, 'README.md'),
+        content: generateReadme(projectName, spec.idea),
+      });
+    }
+
+    // Add Docker files if not skipped
+    if (!skipDocker) {
+      files.push(
+        {
+          path: path.join(projectDir, 'Dockerfile'),
+          content: generateDockerfile(projectName),
+        },
+        {
+          path: path.join(projectDir, 'docker-compose.yml'),
+          content: generateDockerCompose(projectName),
+        }
+      );
+    }
+
+    // Add data placeholder in standalone mode
+    if (!workspaceMode) {
+      files.push({
         path: path.join(projectDir, 'data', '.gitkeep'),
         content: '',
-      },
-    ];
+      });
+    }
 
     // Write all files
     for (const file of files) {

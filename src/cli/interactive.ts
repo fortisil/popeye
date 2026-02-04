@@ -11,9 +11,11 @@ import {
   authenticateClaude,
   authenticateOpenAI,
   authenticateGemini,
+  authenticateGrok,
   isClaudeCLIInstalled,
   checkClaudeCLIAuth,
   checkGeminiAuth,
+  checkGrokAuth,
 } from '../auth/index.js';
 import {
   runWorkflow,
@@ -46,6 +48,177 @@ import {
   theme,
 } from './output.js';
 
+/**
+ * Project-local configuration stored in popeye.md
+ */
+interface PopeyeProjectConfig {
+  language: OutputLanguage;
+  reviewer: AIProvider;
+  arbitrator: AIProvider;
+  enableArbitration: boolean;
+  created: string;
+  lastRun: string;
+  projectName?: string;
+  description?: string;
+  notes?: string;
+}
+
+/**
+ * Read popeye.md from project directory
+ * Returns null if file doesn't exist
+ */
+async function readPopeyeConfig(projectDir: string): Promise<PopeyeProjectConfig | null> {
+  const configPath = path.join(projectDir, 'popeye.md');
+
+  try {
+    const content = await fs.readFile(configPath, 'utf-8');
+
+    // Parse YAML frontmatter
+    const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (!frontmatterMatch) {
+      return null;
+    }
+
+    const frontmatter = frontmatterMatch[1];
+    const config: Partial<PopeyeProjectConfig> = {};
+
+    // Parse each line of YAML
+    for (const line of frontmatter.split('\n')) {
+      const match = line.match(/^(\w+):\s*(.+)$/);
+      if (match) {
+        const [, key, value] = match;
+        const cleanValue = value.trim();
+
+        switch (key) {
+          case 'language':
+            if (['python', 'typescript', 'fullstack'].includes(cleanValue)) {
+              config.language = cleanValue as OutputLanguage;
+            }
+            break;
+          case 'reviewer':
+            if (['openai', 'gemini', 'grok'].includes(cleanValue)) {
+              config.reviewer = cleanValue as AIProvider;
+            }
+            break;
+          case 'arbitrator':
+            if (['openai', 'gemini', 'grok', 'off'].includes(cleanValue)) {
+              if (cleanValue === 'off') {
+                config.enableArbitration = false;
+              } else {
+                config.arbitrator = cleanValue as AIProvider;
+                config.enableArbitration = true;
+              }
+            }
+            break;
+          case 'created':
+            config.created = cleanValue;
+            break;
+          case 'lastRun':
+            config.lastRun = cleanValue;
+            break;
+          case 'projectName':
+            config.projectName = cleanValue;
+            break;
+        }
+      }
+    }
+
+    // Extract notes section if present
+    const notesMatch = content.match(/## Notes\n([\s\S]*?)(?=\n## |$)/);
+    if (notesMatch) {
+      config.notes = notesMatch[1].trim();
+    }
+
+    // Return config only if we have the essential fields
+    if (config.language && config.reviewer) {
+      return {
+        language: config.language,
+        reviewer: config.reviewer,
+        arbitrator: config.arbitrator || 'gemini',
+        enableArbitration: config.enableArbitration ?? true,
+        created: config.created || new Date().toISOString(),
+        lastRun: config.lastRun || new Date().toISOString(),
+        projectName: config.projectName,
+        description: config.description,
+        notes: config.notes,
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write popeye.md to project directory
+ */
+async function writePopeyeConfig(
+  projectDir: string,
+  config: PopeyeProjectConfig
+): Promise<void> {
+  const configPath = path.join(projectDir, 'popeye.md');
+
+  const content = `---
+# Popeye Project Configuration
+language: ${config.language}
+reviewer: ${config.reviewer}
+arbitrator: ${config.enableArbitration ? config.arbitrator : 'off'}
+created: ${config.created}
+lastRun: ${new Date().toISOString()}
+${config.projectName ? `projectName: ${config.projectName}` : ''}
+---
+
+# ${config.projectName || 'Popeye Project'}
+
+${config.description ? `## Description\n${config.description}\n` : ''}
+## Notes
+${config.notes || 'Add any guidance or notes for Claude here...'}
+
+## Configuration
+- **Language**: ${config.language}
+- **Reviewer**: ${config.reviewer}
+- **Arbitrator**: ${config.enableArbitration ? config.arbitrator : 'disabled'}
+
+## Session History
+- ${config.created.split('T')[0]}: Project created
+- ${new Date().toISOString().split('T')[0]}: Last session
+`;
+
+  await fs.writeFile(configPath, content, 'utf-8');
+}
+
+/**
+ * Update lastRun in popeye.md without changing other content
+ */
+async function updatePopeyeLastRun(projectDir: string): Promise<void> {
+  const configPath = path.join(projectDir, 'popeye.md');
+
+  try {
+    let content = await fs.readFile(configPath, 'utf-8');
+
+    // Update lastRun in frontmatter
+    content = content.replace(
+      /lastRun:\s*.+/,
+      `lastRun: ${new Date().toISOString()}`
+    );
+
+    await fs.writeFile(configPath, content, 'utf-8');
+  } catch {
+    // File doesn't exist, ignore
+  }
+}
+
+/**
+ * Apply popeye.md config to session state
+ */
+function applyPopeyeConfig(state: SessionState, config: PopeyeProjectConfig): void {
+  state.language = config.language;
+  state.reviewer = config.reviewer;
+  state.arbitrator = config.arbitrator;
+  state.enableArbitration = config.enableArbitration;
+}
+
 // Note: startSpinner, succeedSpinner, failSpinner, stopSpinner are used in handleIdea
 
 /**
@@ -73,6 +246,7 @@ interface SessionState {
   claudeAuth: boolean;
   openaiAuth: boolean;
   geminiAuth: boolean;
+  grokAuth: boolean;
   reviewer: AIProvider;
   arbitrator: AIProvider;
   enableArbitration: boolean;
@@ -128,7 +302,7 @@ function drawInputBoxTop(state: SessionState): void {
 
   // Hints line (above the box)
   const hints = [
-    theme.dim('/lang ') + theme.primary('py') + theme.dim('|') + theme.primary('ts'),
+    theme.dim('/lang ') + theme.primary('py') + theme.dim('|') + theme.primary('ts') + theme.dim('|') + theme.primary('fs'),
     theme.dim('/config'),
     theme.dim('/help'),
     theme.dim('/exit'),
@@ -136,10 +310,18 @@ function drawInputBoxTop(state: SessionState): void {
   console.log('  ' + hints.join('   '));
 
   // Status items for the top line
-  const langStatus = state.language;
-  const reviewerStatus = state.reviewer === 'openai' ? 'O' : 'G';
-  const arbitratorStatus = state.enableArbitration ? (state.arbitrator === 'openai' ? 'O' : 'G') : '-';
-  const allAuth = state.claudeAuth && state.openaiAuth && (state.enableArbitration ? state.geminiAuth : true);
+  const langStatus = state.language === 'fullstack' ? 'fs' : state.language;
+  const reviewerStatus = state.reviewer === 'openai' ? 'O' : state.reviewer === 'grok' ? 'X' : 'G';
+  const arbitratorStatus = state.enableArbitration
+    ? (state.arbitrator === 'openai' ? 'O' : state.arbitrator === 'grok' ? 'X' : 'G')
+    : '-';
+  // Check auth based on which providers are configured
+  const reviewerAuthed = state.reviewer === 'openai' ? state.openaiAuth
+    : state.reviewer === 'grok' ? state.grokAuth : state.geminiAuth;
+  const arbitratorAuthed = !state.enableArbitration ? true
+    : state.arbitrator === 'openai' ? state.openaiAuth
+    : state.arbitrator === 'grok' ? state.grokAuth : state.geminiAuth;
+  const allAuth = state.claudeAuth && reviewerAuthed && arbitratorAuthed;
   const authIcon = allAuth ? '●' : '○';
   const authColor = allAuth ? theme.success : theme.warning;
 
@@ -300,6 +482,8 @@ async function ensureAuthentication(state: SessionState): Promise<boolean> {
   state.claudeAuth = status.claude.authenticated;
   state.openaiAuth = status.openai.authenticated;
   state.geminiAuth = status.gemini?.authenticated || false;
+  const grokStatus = await checkGrokAuth();
+  state.grokAuth = grokStatus.authenticated;
 
   console.log();
   printInfo('Checking authentication...');
@@ -362,6 +546,7 @@ async function ensureAuthentication(state: SessionState): Promise<boolean> {
       [
         { label: theme.secondary('OpenAI') + theme.dim(' - GPT-4o reviews plans'), value: 'openai' },
         { label: theme.secondary('Gemini') + theme.dim(' - Gemini 2.0 reviews plans'), value: 'gemini' },
+        { label: theme.secondary('Grok') + theme.dim(' - xAI Grok reviews plans'), value: 'grok' },
       ],
       'openai'
     ) as AIProvider;
@@ -374,14 +559,16 @@ async function ensureAuthentication(state: SessionState): Promise<boolean> {
     );
 
     if (state.enableArbitration) {
-      // Auto-select the other provider as arbitrator
-      const defaultArbitrator = state.reviewer === 'openai' ? 'gemini' : 'openai';
+      // Auto-select a different provider as arbitrator
+      const defaultArbitrator = state.reviewer === 'openai' ? 'gemini'
+        : state.reviewer === 'gemini' ? 'openai' : 'gemini';
 
       state.arbitrator = await promptSelection(
         'Who should arbitrate when stuck?',
         [
           { label: theme.secondary('Gemini') + theme.dim(' - Google Gemini breaks deadlocks'), value: 'gemini' },
           { label: theme.secondary('OpenAI') + theme.dim(' - OpenAI breaks deadlocks'), value: 'openai' },
+          { label: theme.secondary('Grok') + theme.dim(' - xAI Grok breaks deadlocks'), value: 'grok' },
         ],
         defaultArbitrator
       ) as AIProvider;
@@ -407,6 +594,39 @@ async function ensureAuthentication(state: SessionState): Promise<boolean> {
           state.enableArbitration = false;
         }
       }
+
+      // Authenticate Grok if needed for reviewer or arbitrator
+      const needsGrok = state.reviewer === 'grok' || state.arbitrator === 'grok';
+      if (needsGrok && !state.grokAuth) {
+        console.log();
+        console.log(theme.dim(box.vertical) + ' ' + theme.primary('Grok API') + theme.dim(' - Required for ' + (state.reviewer === 'grok' ? 'review' : 'arbitration')));
+        console.log(theme.dim(box.vertical));
+
+        try {
+          const success = await authenticateGrok();
+          if (success) {
+            printSuccess('Grok API ready');
+            state.grokAuth = true;
+          } else {
+            printWarning('Grok API not authenticated');
+            if (state.reviewer === 'grok') {
+              printWarning('Falling back to OpenAI as reviewer');
+              state.reviewer = 'openai';
+            }
+            if (state.arbitrator === 'grok') {
+              state.enableArbitration = false;
+            }
+          }
+        } catch (err) {
+          printError(err instanceof Error ? err.message : 'Authentication failed');
+          if (state.reviewer === 'grok') {
+            state.reviewer = 'openai';
+          }
+          if (state.arbitrator === 'grok') {
+            state.enableArbitration = false;
+          }
+        }
+      }
     }
 
     // Also check if reviewer is gemini and we need to auth
@@ -430,21 +650,46 @@ async function ensureAuthentication(state: SessionState): Promise<boolean> {
       }
     }
 
+    // Also check if reviewer is grok and we need to auth
+    if (state.reviewer === 'grok' && !state.grokAuth) {
+      console.log();
+      console.log(theme.dim(box.vertical) + ' ' + theme.primary('Grok API') + theme.dim(' - Required for review'));
+      console.log(theme.dim(box.vertical));
+
+      try {
+        const success = await authenticateGrok();
+        if (success) {
+          printSuccess('Grok API ready');
+          state.grokAuth = true;
+        } else {
+          printWarning('Grok API not authenticated - falling back to OpenAI');
+          state.reviewer = 'openai';
+        }
+      } catch (err) {
+        printError(err instanceof Error ? err.message : 'Authentication failed');
+        state.reviewer = 'openai';
+      }
+    }
+
     // Save the configuration to persist between sessions
     await saveConsensusConfig(state);
 
     // Show summary
     console.log();
     console.log(theme.secondary('  Configuration saved. Use /config to change later.'));
-    console.log(`    ${theme.dim('Reviewer:')}    ${theme.primary(state.reviewer === 'openai' ? 'OpenAI (GPT-4o)' : 'Gemini')}`);
-    console.log(`    ${theme.dim('Arbitrator:')}  ${state.enableArbitration ? theme.primary(state.arbitrator === 'openai' ? 'OpenAI' : 'Gemini') : theme.dim('Disabled')}`);
+    const reviewerName = state.reviewer === 'openai' ? 'OpenAI (GPT-4o)' : state.reviewer === 'grok' ? 'Grok' : 'Gemini';
+    const arbitratorName = state.arbitrator === 'openai' ? 'OpenAI' : state.arbitrator === 'grok' ? 'Grok' : 'Gemini';
+    console.log(`    ${theme.dim('Reviewer:')}    ${theme.primary(reviewerName)}`);
+    console.log(`    ${theme.dim('Arbitrator:')}  ${state.enableArbitration ? theme.primary(arbitratorName) : theme.dim('Disabled')}`);
     console.log();
   } else if (state.claudeAuth && state.openaiAuth && alreadyConfigured) {
     // Show loaded configuration
     console.log();
     console.log(theme.secondary('  Using saved configuration (use /config to change):'));
-    console.log(`    ${theme.dim('Reviewer:')}    ${theme.primary(state.reviewer === 'openai' ? 'OpenAI (GPT-4o)' : 'Gemini')}`);
-    console.log(`    ${theme.dim('Arbitrator:')}  ${state.enableArbitration ? theme.primary(state.arbitrator === 'openai' ? 'OpenAI' : 'Gemini') : theme.dim('Disabled')}`);
+    const savedReviewerName = state.reviewer === 'openai' ? 'OpenAI (GPT-4o)' : state.reviewer === 'grok' ? 'Grok' : 'Gemini';
+    const savedArbitratorName = state.arbitrator === 'openai' ? 'OpenAI' : state.arbitrator === 'grok' ? 'Grok' : 'Gemini';
+    console.log(`    ${theme.dim('Reviewer:')}    ${theme.primary(savedReviewerName)}`);
+    console.log(`    ${theme.dim('Arbitrator:')}  ${state.enableArbitration ? theme.primary(savedArbitratorName) : theme.dim('Disabled')}`);
     console.log();
 
     // Authenticate Gemini if needed based on saved config
@@ -474,6 +719,34 @@ async function ensureAuthentication(state: SessionState): Promise<boolean> {
       }
       console.log();
     }
+
+    // Authenticate Grok if needed based on saved config
+    const needsGrok = state.reviewer === 'grok' || (state.enableArbitration && state.arbitrator === 'grok');
+    if (needsGrok && !state.grokAuth) {
+      console.log(theme.dim(box.vertical) + ' ' + theme.primary('Grok API') + theme.dim(' - Required for ' + (state.reviewer === 'grok' ? 'review' : 'arbitration')));
+      console.log(theme.dim(box.vertical));
+
+      try {
+        const success = await authenticateGrok();
+        if (success) {
+          printSuccess('Grok API ready');
+          state.grokAuth = true;
+        } else {
+          printWarning('Grok API not authenticated');
+          if (state.reviewer === 'grok') {
+            printWarning('Falling back to OpenAI as reviewer');
+            state.reviewer = 'openai';
+          }
+          if (state.enableArbitration && state.arbitrator === 'grok') {
+            printWarning('Disabling arbitration');
+            state.enableArbitration = false;
+          }
+        }
+      } catch (err) {
+        printError(err instanceof Error ? err.message : 'Grok authentication failed');
+      }
+      console.log();
+    }
   }
 
   return state.claudeAuth && state.openaiAuth;
@@ -493,9 +766,9 @@ function showHelp(): void {
     ['/status', 'Show current project status'],
     ['/auth', 'Re-authenticate services'],
     ['/config', 'Show/change configuration'],
-    ['/config reviewer', 'Set reviewer (openai/gemini)'],
-    ['/config arbitrator', 'Set arbitrator (openai/gemini/off)'],
-    ['/lang <lang>', 'Set language (python/typescript)'],
+    ['/config reviewer', 'Set reviewer (openai/gemini/grok)'],
+    ['/config arbitrator', 'Set arbitrator (openai/gemini/grok/off)'],
+    ['/lang <lang>', 'Set language (python/typescript/fullstack)'],
     ['/new <idea>', 'Force start a new project (skips existing check)'],
     ['/resume', 'Resume interrupted project'],
     ['/clear', 'Clear screen'],
@@ -555,6 +828,14 @@ async function handleInfo(): Promise<void> {
   console.log(`    ${theme.dim('Authenticated:')}  ${geminiStatus.authenticated ? theme.success('Yes') : theme.dim('No')}`);
   if (geminiStatus.authenticated && geminiStatus.keyLastFour) {
     console.log(`    ${theme.dim('API Key:')}        ${theme.dim(geminiStatus.keyLastFour)}`);
+  }
+
+  console.log();
+  console.log(theme.secondary('  Grok:'));
+  const grokStatus = await checkGrokAuth();
+  console.log(`    ${theme.dim('Authenticated:')}  ${grokStatus.authenticated ? theme.success('Yes') : theme.dim('No')}`);
+  if (grokStatus.authenticated && grokStatus.keyLastFour) {
+    console.log(`    ${theme.dim('API Key:')}        ${theme.dim(grokStatus.keyLastFour)}`);
   }
 
   console.log();
@@ -707,9 +988,13 @@ async function handleConfig(state: SessionState, args: string[] = []): Promise<v
       case 'reviewer':
         if (args.length > 1) {
           const newReviewer = args[1].toLowerCase();
-          if (newReviewer === 'openai' || newReviewer === 'gemini') {
+          if (newReviewer === 'openai' || newReviewer === 'gemini' || newReviewer === 'grok') {
             if (newReviewer === 'gemini' && !state.geminiAuth) {
               printWarning('Gemini API not authenticated. Run /auth first.');
+              return;
+            }
+            if (newReviewer === 'grok' && !state.grokAuth) {
+              printWarning('Grok API not authenticated. Run /auth first.');
               return;
             }
             state.reviewer = newReviewer as AIProvider;
@@ -717,20 +1002,24 @@ async function handleConfig(state: SessionState, args: string[] = []): Promise<v
             await saveConsensusConfig(state);
             printSuccess(`Reviewer set to ${newReviewer}`);
           } else {
-            printError('Invalid reviewer. Use: openai or gemini');
+            printError('Invalid reviewer. Use: openai, gemini, or grok');
           }
         } else {
           printKeyValue('Reviewer', state.reviewer);
-          printInfo('Use: /config reviewer <openai|gemini>');
+          printInfo('Use: /config reviewer <openai|gemini|grok>');
         }
         return;
 
       case 'arbitrator':
         if (args.length > 1) {
           const newArbitrator = args[1].toLowerCase();
-          if (newArbitrator === 'openai' || newArbitrator === 'gemini') {
+          if (newArbitrator === 'openai' || newArbitrator === 'gemini' || newArbitrator === 'grok') {
             if (newArbitrator === 'gemini' && !state.geminiAuth) {
               printWarning('Gemini API not authenticated. Run /auth first.');
+              return;
+            }
+            if (newArbitrator === 'grok' && !state.grokAuth) {
+              printWarning('Grok API not authenticated. Run /auth first.');
               return;
             }
             state.arbitrator = newArbitrator as AIProvider;
@@ -744,23 +1033,33 @@ async function handleConfig(state: SessionState, args: string[] = []): Promise<v
             await saveConsensusConfig(state);
             printSuccess('Arbitration disabled');
           } else {
-            printError('Invalid arbitrator. Use: openai, gemini, or off');
+            printError('Invalid arbitrator. Use: openai, gemini, grok, or off');
           }
         } else {
           printKeyValue('Arbitrator', state.enableArbitration ? state.arbitrator : 'disabled');
-          printInfo('Use: /config arbitrator <openai|gemini|off>');
+          printInfo('Use: /config arbitrator <openai|gemini|grok|off>');
         }
         return;
 
       case 'language':
       case 'lang':
         if (args.length > 1) {
-          const lang = args[1].toLowerCase() as OutputLanguage;
-          if (['python', 'typescript'].includes(lang)) {
+          // Map shortcuts to full language names
+          const langAliases: Record<string, OutputLanguage> = {
+            'py': 'python',
+            'python': 'python',
+            'ts': 'typescript',
+            'typescript': 'typescript',
+            'fs': 'fullstack',
+            'fullstack': 'fullstack',
+          };
+          const input = args[1].toLowerCase();
+          const lang = langAliases[input];
+          if (lang) {
             state.language = lang;
             printSuccess(`Language set to ${lang}`);
           } else {
-            printError('Invalid language. Use: python or typescript');
+            printError('Invalid language. Use: py, ts, fs (or python, typescript, fullstack)');
           }
         } else {
           printKeyValue('Language', state.language);
@@ -784,19 +1083,22 @@ async function handleConfig(state: SessionState, args: string[] = []): Promise<v
   console.log(`    ${theme.dim('Claude:')}     ${state.claudeAuth ? theme.success('● Ready') : theme.error('○ Not authenticated')}`);
   console.log(`    ${theme.dim('OpenAI:')}     ${state.openaiAuth ? theme.success('● Ready') : theme.error('○ Not authenticated')}`);
   console.log(`    ${theme.dim('Gemini:')}     ${state.geminiAuth ? theme.success('● Ready') : theme.dim('○ Not configured')}`);
+  console.log(`    ${theme.dim('Grok:')}       ${state.grokAuth ? theme.success('● Ready') : theme.dim('○ Not configured')}`);
   console.log();
   console.log(theme.primary.bold('  AI Configuration:'));
-  console.log(`    ${theme.dim('Reviewer:')}   ${theme.primary(state.reviewer === 'openai' ? 'OpenAI (GPT-4o)' : 'Gemini')}`);
-  console.log(`    ${theme.dim('Arbitrator:')} ${state.enableArbitration ? theme.primary(state.arbitrator === 'openai' ? 'OpenAI' : 'Gemini') : theme.dim('Disabled')}`);
+  const configReviewerName = state.reviewer === 'openai' ? 'OpenAI (GPT-4o)' : state.reviewer === 'grok' ? 'Grok' : 'Gemini';
+  const configArbitratorName = state.arbitrator === 'openai' ? 'OpenAI' : state.arbitrator === 'grok' ? 'Grok' : 'Gemini';
+  console.log(`    ${theme.dim('Reviewer:')}   ${theme.primary(configReviewerName)}`);
+  console.log(`    ${theme.dim('Arbitrator:')} ${state.enableArbitration ? theme.primary(configArbitratorName) : theme.dim('Disabled')}`);
   console.log();
   console.log(theme.primary.bold('  Consensus:'));
   console.log(`    ${theme.dim('Threshold:')}  ${config.consensus.threshold}%`);
   console.log(`    ${theme.dim('Max Iters:')}  ${config.consensus.max_disagreements}`);
   console.log();
   console.log(theme.secondary('  Change settings:'));
-  console.log(theme.dim('    /config reviewer <openai|gemini>'));
-  console.log(theme.dim('    /config arbitrator <openai|gemini|off>'));
-  console.log(theme.dim('    /config language <python|typescript>'));
+  console.log(theme.dim('    /config reviewer <openai|gemini|grok>'));
+  console.log(theme.dim('    /config arbitrator <openai|gemini|grok|off>'));
+  console.log(theme.dim('    /config language <python|typescript|fullstack>'));
   console.log();
 }
 
@@ -807,13 +1109,25 @@ function handleLanguage(args: string[], state: SessionState): void {
   if (args.length === 0) {
     console.log();
     printKeyValue('Current language', state.language);
-    printInfo('Use /language <python|typescript> to change');
+    printInfo('Use /language <py|ts|fs> or <python|typescript|fullstack> to change');
     return;
   }
 
-  const lang = args[0].toLowerCase() as OutputLanguage;
-  if (!['python', 'typescript'].includes(lang)) {
-    printError('Invalid language. Use: python or typescript');
+  // Map shortcuts to full language names
+  const langAliases: Record<string, OutputLanguage> = {
+    'py': 'python',
+    'python': 'python',
+    'ts': 'typescript',
+    'typescript': 'typescript',
+    'fs': 'fullstack',
+    'fullstack': 'fullstack',
+  };
+
+  const input = args[0].toLowerCase();
+  const lang = langAliases[input];
+
+  if (!lang) {
+    printError('Invalid language. Use: py, ts, fs (or python, typescript, fullstack)');
     return;
   }
 
@@ -1090,6 +1404,14 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
   if (!state.projectDir) {
     printError('No project directory set');
     return;
+  }
+
+  // Check for popeye.md and load project-specific configuration
+  const popeyeConfig = await readPopeyeConfig(state.projectDir);
+  if (popeyeConfig) {
+    applyPopeyeConfig(state, popeyeConfig);
+    await updatePopeyeLastRun(state.projectDir);
+    printInfo(`Loaded config from popeye.md (${popeyeConfig.language}, reviewer: ${popeyeConfig.reviewer})`);
   }
 
   const status = await getWorkflowStatus(state.projectDir);
@@ -1448,7 +1770,45 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
  * Extracts key nouns and creates a kebab-case name
  */
 function generateProjectName(idea: string): string {
-  // Common words to filter out
+  // 1. First, try to find explicit project name patterns
+  const explicitPatterns = [
+    /(?:called|named|for|planning|project)\s+["']?([A-Z][a-zA-Z0-9]+)["']?/i,
+    /["']([A-Z][a-zA-Z0-9]+)["']/,  // Quoted names
+    /\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b/,  // CamelCase names like "TodoMaster"
+  ];
+
+  for (const pattern of explicitPatterns) {
+    const match = idea.match(pattern);
+    if (match && match[1] && match[1].length >= 3 && match[1].length <= 30) {
+      // Convert to kebab-case
+      return match[1]
+        .replace(/([a-z])([A-Z])/g, '$1-$2')
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+    }
+  }
+
+  // 2. Look for standalone capitalized words (potential project names)
+  // Exclude common capitalized words at sentence start
+  const capitalizedWords = idea.match(/\b([A-Z][a-z]{2,})\b/g) || [];
+  const excludeCapitalized = new Set([
+    'Build', 'Create', 'Make', 'Develop', 'Write', 'Implement', 'Design',
+    'Read', 'Start', 'Help', 'Please', 'Want', 'Need', 'Use', 'Add',
+    'The', 'This', 'That', 'What', 'When', 'Where', 'How', 'Why',
+  ]);
+
+  const projectNameCandidates = capitalizedWords.filter(
+    w => !excludeCapitalized.has(w) && w.length >= 3
+  );
+
+  if (projectNameCandidates.length > 0) {
+    // Use the first non-excluded capitalized word
+    return projectNameCandidates[0].toLowerCase();
+  }
+
+  // 3. Fall back to extracting meaningful words
   const stopWords = new Set([
     'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
     'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'been',
@@ -1458,6 +1818,9 @@ function generateProjectName(idea: string): string {
     'want', 'like', 'please', 'help', 'me', 'i', 'my', 'we', 'our', 'you',
     'your', 'that', 'which', 'who', 'what', 'where', 'when', 'why', 'how',
     'this', 'these', 'those', 'it', 'its', 'simple', 'basic', 'new',
+    // Action verbs that shouldn't be project names
+    'read', 'start', 'planning', 'reading', 'starting', 'begin', 'beginning',
+    'all', 'files', 'file', 'directory', 'folder', 'also',
   ]);
 
   // Extract meaningful words
@@ -1638,6 +2001,19 @@ async function handleIdea(idea: string, state: SessionState): Promise<void> {
 
   succeedSpinner(`Created ${scaffoldResult.filesCreated.length} files`);
 
+  // Create popeye.md with project configuration
+  await writePopeyeConfig(projectDir, {
+    language: state.language,
+    reviewer: state.reviewer,
+    arbitrator: state.arbitrator,
+    enableArbitration: state.enableArbitration,
+    created: new Date().toISOString(),
+    lastRun: new Date().toISOString(),
+    projectName,
+    description: idea,
+  });
+  printInfo('Created popeye.md with project configuration');
+
   // Run workflow with reviewer/arbitrator settings
   console.log();
   printInfo('Starting AI workflow...');
@@ -1726,6 +2102,19 @@ async function handleNewProject(idea: string, state: SessionState): Promise<void
 
   succeedSpinner(`Created ${scaffoldResult.filesCreated.length} files`);
 
+  // Create popeye.md with project configuration
+  await writePopeyeConfig(projectDir, {
+    language: state.language,
+    reviewer: state.reviewer,
+    arbitrator: state.arbitrator,
+    enableArbitration: state.enableArbitration,
+    created: new Date().toISOString(),
+    lastRun: new Date().toISOString(),
+    projectName,
+    description: idea,
+  });
+  printInfo('Created popeye.md with project configuration');
+
   // Run workflow with reviewer/arbitrator settings
   console.log();
   printInfo('Starting AI workflow...');
@@ -1779,6 +2168,7 @@ export async function startInteractiveMode(): Promise<void> {
     claudeAuth: false,
     openaiAuth: false,
     geminiAuth: false,
+    grokAuth: false,
     // Load saved reviewer/arbitrator settings from config
     reviewer: config.consensus.reviewer,
     arbitrator: config.consensus.arbitrator === 'off' ? 'openai' : config.consensus.arbitrator,
@@ -1795,7 +2185,7 @@ export async function startInteractiveMode(): Promise<void> {
   console.log(theme.dim('  ├─ ') + theme.secondary('Reviewer (configurable)') + theme.dim(' - Reviews plans until consensus'));
   console.log(theme.dim('  └─ ') + theme.secondary('Arbitrator (optional)') + theme.dim(' - Breaks deadlocks when stuck'));
   console.log();
-  console.log(theme.dim('  You can choose OpenAI or Gemini as reviewer/arbitrator during setup.'));
+  console.log(theme.dim('  You can choose OpenAI, Gemini, or Grok as reviewer/arbitrator during setup.'));
   console.log(theme.dim('  Plans are saved to docs/ folder in markdown format.'));
   console.log();
 

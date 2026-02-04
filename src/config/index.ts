@@ -86,12 +86,26 @@ function loadEnvConfig(): Partial<Config> {
         model: openaiModel as Config['apis']['openai']['model'],
       },
       claude: DEFAULT_CONFIG.apis.claude,
+      grok: DEFAULT_CONFIG.apis.grok,
+    };
+  }
+
+  // Grok model
+  const grokModel = process.env[ENV_VARS.GROK_MODEL];
+  if (grokModel) {
+    config.apis = {
+      ...DEFAULT_CONFIG.apis,
+      ...(config.apis || {}),
+      grok: {
+        ...DEFAULT_CONFIG.apis.grok,
+        model: grokModel,
+      },
     };
   }
 
   // Default language
   const defaultLanguage = process.env[ENV_VARS.DEFAULT_LANGUAGE];
-  if (defaultLanguage && (defaultLanguage === 'python' || defaultLanguage === 'typescript')) {
+  if (defaultLanguage && (defaultLanguage === 'python' || defaultLanguage === 'typescript' || defaultLanguage === 'fullstack')) {
     config.project = {
       ...DEFAULT_CONFIG.project,
       default_language: defaultLanguage,
@@ -126,7 +140,7 @@ function loadEnvConfig(): Partial<Config> {
 
   // Reviewer
   const reviewer = process.env[ENV_VARS.CONSENSUS_REVIEWER];
-  if (reviewer && (reviewer === 'openai' || reviewer === 'gemini')) {
+  if (reviewer && (reviewer === 'openai' || reviewer === 'gemini' || reviewer === 'grok')) {
     config.consensus = {
       ...DEFAULT_CONFIG.consensus,
       ...(config.consensus || {}),
@@ -136,7 +150,7 @@ function loadEnvConfig(): Partial<Config> {
 
   // Arbitrator
   const arbitrator = process.env[ENV_VARS.CONSENSUS_ARBITRATOR];
-  if (arbitrator && (arbitrator === 'openai' || arbitrator === 'gemini' || arbitrator === 'off')) {
+  if (arbitrator && (arbitrator === 'openai' || arbitrator === 'gemini' || arbitrator === 'grok' || arbitrator === 'off')) {
     config.consensus = {
       ...DEFAULT_CONFIG.consensus,
       ...(config.consensus || {}),

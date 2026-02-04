@@ -45,9 +45,9 @@ interface RateLimitConfig {
 }
 
 const DEFAULT_RATE_LIMIT_CONFIG: RateLimitConfig = {
-  maxRetries: 5,
-  baseWaitMs: 5 * 60_000, // 5 minutes
-  maxWaitMs: 2 * 60 * 60_000, // 2 hours
+  maxRetries: 3,
+  baseWaitMs: 60_000, // 1 minute
+  maxWaitMs: 10 * 60_000, // 10 minutes max - don't wait longer than this
 };
 
 /**
@@ -654,6 +654,18 @@ export async function executePrompt(
     // Ensure minimum wait time
     waitMs = Math.max(waitMs, 30_000);
 
+    // IMPORTANT: Cap wait time to maxWaitMs - don't wait hours for rate limits
+    if (waitMs > rateLimitConfig.maxWaitMs) {
+      onProgress?.(`Rate limit reset time is too far in the future (${formatWaitTime(waitMs)})`);
+      onProgress?.(`Maximum wait time is ${formatWaitTime(rateLimitConfig.maxWaitMs)}. Please try again later.`);
+      return {
+        success: false,
+        response: result.response,
+        toolCalls: result.toolCalls,
+        error: `Rate limit exceeded. Reset time is ${formatWaitTime(waitMs)} away - too long to wait. Please try again later.`,
+      };
+    }
+
     onProgress?.(`Rate limit hit (attempt ${attempt}/${rateLimitConfig.maxRetries}). ${result.rateLimitInfo.message || ''}`);
     onProgress?.(`Waiting ${formatWaitTime(waitMs)} before retry...`);
 
@@ -820,18 +832,20 @@ function isConversationalResponse(response: string): boolean {
 }
 
 /**
- * Create a development plan from a specification
+ * Build the appropriate prompt for plan creation based on project language
  *
  * @param specification - The project specification
- * @param context - Additional context (existing code, etc.)
- * @param onProgress - Progress callback
+ * @param context - Additional context
+ * @param language - Target programming language
+ * @returns The prompt string
  */
-export async function createPlan(
+function buildPlanPrompt(
   specification: string,
-  context: string = '',
-  onProgress?: (message: string) => void
-): Promise<ClaudeExecuteResult> {
-  const prompt = `
+  context: string,
+  language: 'python' | 'typescript' | 'fullstack'
+): string {
+  // Base instructions that apply to all projects
+  const baseInstructions = `
 You are a software architect. Create a detailed, actionable development plan.
 
 CRITICAL INSTRUCTION: You must output the COMPLETE plan content directly in your response as markdown.
@@ -840,6 +854,122 @@ Do NOT just describe what the plan contains - output the ACTUAL plan with all mi
 Do NOT say "Let me...", "I will...", "I've created...", or any conversational text.
 
 Start your response with "# Development Plan:" and include the FULL plan content.
+`.trim();
+
+  // Fullstack-specific format with app tagging
+  if (language === 'fullstack') {
+    return `
+${baseInstructions}
+
+## Project Type: FULLSTACK MONOREPO
+- **Frontend**: React + Vite + TypeScript + Tailwind CSS + shadcn/ui
+- **Backend**: FastAPI (Python) + PostgreSQL
+- **Structure**: Monorepo with apps/frontend and apps/backend
+
+## Specification
+${specification}
+
+${context ? `## Additional Context\n${context}` : ''}
+
+## Required Plan Format for Fullstack Projects
+
+Your response MUST be the complete plan in this EXACT format:
+
+# Development Plan: [Project Name]
+
+## Overview
+[2-3 sentence summary mentioning both frontend and backend]
+
+## Architecture
+- **Frontend App**: React SPA at apps/frontend/
+- **Backend App**: FastAPI service at apps/backend/
+- **Communication**: REST API (OpenAPI contract)
+
+---
+
+## Milestone 1: [Name]
+**Description**: [What this milestone achieves]
+
+### Frontend Tasks
+
+#### Task 1.1 [FE]: [Actionable task name]
+**App**: frontend
+**Files**:
+- \`apps/frontend/src/components/...\`
+- \`apps/frontend/src/pages/...\`
+**Dependencies**: None
+**Acceptance Criteria**:
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+### Backend Tasks
+
+#### Task 1.2 [BE]: [Actionable task name]
+**App**: backend
+**Files**:
+- \`apps/backend/src/api/routes/...\`
+- \`apps/backend/src/models/...\`
+**Dependencies**: None
+**Acceptance Criteria**:
+- [ ] Criterion 1
+
+### Integration Tasks
+
+#### Task 1.3 [INT]: [Actionable task name]
+**App**: unified
+**Dependencies**: Task 1.1, Task 1.2
+**Acceptance Criteria**:
+- [ ] Frontend calls backend API successfully
+- [ ] E2E test passes
+
+---
+
+## Milestone 2: [Name]
+[Continue same pattern...]
+
+---
+
+## Test Plan
+
+### Frontend Tests (apps/frontend)
+- **Unit**: Vitest + Testing Library
+- **E2E**: Playwright
+
+### Backend Tests (apps/backend)
+- **Unit**: pytest
+- **Integration**: pytest + TestClient
+
+### Integration Tests
+- API contract validation
+- E2E user flows
+
+## Risks & Mitigations
+[Include frontend, backend, and integration risks separately]
+
+---
+
+## CRITICAL FULLSTACK REQUIREMENTS:
+1. **Tag every task** with [FE], [BE], or [INT]
+2. **Specify App field** for each task (frontend, backend, or unified)
+3. **List exact file paths** under apps/frontend/ or apps/backend/
+4. **Group tasks** under "Frontend Tasks", "Backend Tasks", or "Integration Tasks" headers
+5. **Include at least 3 milestones** with tasks distributed across FE/BE/INT
+6. Each task MUST start with an action verb: Implement, Create, Build, Add, Configure, Set up, Write, Design, etc.
+7. Each task MUST be specific and implementable
+
+IMPORTANT: Output the COMPLETE plan now. Start with "# Development Plan:" on the first line.
+`.trim();
+  }
+
+  // Python-specific format
+  if (language === 'python') {
+    return `
+${baseInstructions}
+
+## Project Type: PYTHON
+- **Language**: Python 3.11+
+- **Framework**: FastAPI (if API) or CLI
+- **Testing**: pytest
 
 ## Specification
 ${specification}
@@ -857,11 +987,10 @@ Your response MUST be the complete plan in this EXACT format:
 
 ## Milestone 1: [Name]
 **Description**: [What this milestone achieves]
-**Estimated Duration**: [X days/weeks]
 
 ### Task 1.1: [Actionable task name starting with verb]
 **Description**: [What this task accomplishes]
-**Files to create/modify**: [List specific files]
+**Files to create/modify**: [List specific Python files in src/]
 **Acceptance Criteria**:
 - [Specific, testable criterion]
 - [Another criterion]
@@ -873,7 +1002,8 @@ Your response MUST be the complete plan in this EXACT format:
 ...
 
 ## Test Plan
-[How to verify the implementation works]
+- pytest for unit tests in tests/
+- httpx for API integration tests
 
 ## Risks & Mitigations
 [Potential issues and how to address them]
@@ -881,7 +1011,7 @@ Your response MUST be the complete plan in this EXACT format:
 ## Requirements for Tasks
 
 1. Each task MUST start with an action verb: Implement, Create, Build, Add, Configure, Set up, Write, Design, etc.
-2. Each task MUST be specific and implementable (not vague like "handle errors" - instead "Implement error handling middleware with custom error classes")
+2. Each task MUST be specific and implementable
 3. Each milestone MUST have at least 3-5 specific tasks
 4. The plan MUST have at least 3 milestones for any non-trivial project
 5. Files to create/modify MUST be listed for each task
@@ -889,6 +1019,82 @@ Your response MUST be the complete plan in this EXACT format:
 
 IMPORTANT: Output the COMPLETE plan now. Start with "# Development Plan:" on the first line.
 `.trim();
+  }
+
+  // TypeScript/default format
+  return `
+${baseInstructions}
+
+## Project Type: TYPESCRIPT
+- **Language**: TypeScript
+- **Framework**: React + Vite (if frontend) or Node.js
+- **Testing**: Vitest
+
+## Specification
+${specification}
+
+${context ? `## Additional Context\n${context}` : ''}
+
+## Required Plan Format
+
+Your response MUST be the complete plan in this EXACT format:
+
+# Development Plan: [Project Name]
+
+## Overview
+[2-3 sentence summary of what will be built]
+
+## Milestone 1: [Name]
+**Description**: [What this milestone achieves]
+
+### Task 1.1: [Actionable task name starting with verb]
+**Description**: [What this task accomplishes]
+**Files to create/modify**: [List specific TypeScript files in src/]
+**Acceptance Criteria**:
+- [Specific, testable criterion]
+- [Another criterion]
+
+### Task 1.2: [Another actionable task]
+...
+
+## Milestone 2: [Name]
+...
+
+## Test Plan
+- Vitest for unit tests
+- Playwright for E2E tests
+
+## Risks & Mitigations
+[Potential issues and how to address them]
+
+## Requirements for Tasks
+
+1. Each task MUST start with an action verb: Implement, Create, Build, Add, Configure, Set up, Write, Design, etc.
+2. Each task MUST be specific and implementable
+3. Each milestone MUST have at least 3-5 specific tasks
+4. The plan MUST have at least 3 milestones for any non-trivial project
+5. Files to create/modify MUST be listed for each task
+6. Acceptance criteria MUST be testable
+
+IMPORTANT: Output the COMPLETE plan now. Start with "# Development Plan:" on the first line.
+`.trim();
+}
+
+/**
+ * Create a development plan from a specification
+ *
+ * @param specification - The project specification
+ * @param context - Additional context (existing code, etc.)
+ * @param language - Target programming language (default: 'python')
+ * @param onProgress - Progress callback
+ */
+export async function createPlan(
+  specification: string,
+  context: string = '',
+  language: 'python' | 'typescript' | 'fullstack' = 'python',
+  onProgress?: (message: string) => void
+): Promise<ClaudeExecuteResult> {
+  const prompt = buildPlanPrompt(specification, context, language);
 
   const result = await executePrompt(prompt, {
     allowedTools: ['Read', 'Glob'],
@@ -973,19 +1179,15 @@ IMPORTANT: Output the COMPLETE plan now. Start with "# Development Plan:" on the
 }
 
 /**
- * Revise a plan based on feedback
- *
- * @param originalPlan - The original plan
- * @param feedback - Feedback to incorporate
- * @param concerns - Specific concerns to address
+ * Build revision prompt with language-specific instructions
  */
-export async function revisePlan(
+function buildRevisionPrompt(
   originalPlan: string,
   feedback: string,
   concerns: string[],
-  onProgress?: (message: string) => void
-): Promise<ClaudeExecuteResult> {
-  const prompt = `
+  language: 'python' | 'typescript' | 'fullstack'
+): string {
+  const basePrompt = `
 CRITICAL: You must output the COMPLETE revised plan in your response.
 Do NOT describe what you changed - output the FULL plan with all changes incorporated.
 Do NOT say "Let me...", "I will...", "I've revised...", or any conversational text.
@@ -1005,9 +1207,46 @@ ${concerns.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 2. Maintain the same plan structure (Overview, Milestones, Tasks, Test Plan, Risks)
 3. Output the COMPLETE revised plan - not just the changes
 4. Start with "# Development Plan:" and include ALL milestones and tasks
+`.trim();
+
+  if (language === 'fullstack') {
+    return `
+${basePrompt}
+
+## FULLSTACK-SPECIFIC REQUIREMENTS:
+- Maintain [FE], [BE], [INT] tags on all tasks
+- Keep App: field (frontend/backend/unified) for each task
+- Group tasks under "Frontend Tasks", "Backend Tasks", "Integration Tasks" headers
+- Ensure file paths use apps/frontend/ or apps/backend/ prefixes
+- If adding new tasks, tag them appropriately
 
 OUTPUT THE COMPLETE REVISED PLAN NOW:
 `.trim();
+  }
+
+  return `${basePrompt}
+
+OUTPUT THE COMPLETE REVISED PLAN NOW:
+`.trim();
+}
+
+/**
+ * Revise a plan based on feedback
+ *
+ * @param originalPlan - The original plan
+ * @param feedback - Feedback to incorporate
+ * @param concerns - Specific concerns to address
+ * @param language - Target programming language (default: 'python')
+ * @param onProgress - Progress callback
+ */
+export async function revisePlan(
+  originalPlan: string,
+  feedback: string,
+  concerns: string[],
+  language: 'python' | 'typescript' | 'fullstack' = 'python',
+  onProgress?: (message: string) => void
+): Promise<ClaudeExecuteResult> {
+  const prompt = buildRevisionPrompt(originalPlan, feedback, concerns, language);
 
   onProgress?.('Claude is revising the plan...');
 

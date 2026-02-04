@@ -52,7 +52,7 @@ export interface PlanModeResult {
  */
 export async function expandIdea(
   idea: string,
-  language: 'python' | 'typescript',
+  language: 'python' | 'typescript' | 'fullstack',
   onProgress?: (message: string) => void
 ): Promise<string> {
   onProgress?.('Expanding idea into specification...');
@@ -68,17 +68,19 @@ export async function expandIdea(
  *
  * @param specification - The project specification
  * @param context - Additional context
+ * @param language - Target programming language
  * @param onProgress - Progress callback
  * @returns Development plan
  */
 export async function createPlan(
   specification: string,
   context: string = '',
+  language: 'python' | 'typescript' | 'fullstack' = 'python',
   onProgress?: (message: string) => void
 ): Promise<string> {
   onProgress?.('Creating development plan...');
 
-  const result = await claudeCreatePlan(specification, context, onProgress);
+  const result = await claudeCreatePlan(specification, context, language, onProgress);
 
   if (!result.success) {
     throw new Error(`Failed to create plan: ${result.error}`);
@@ -209,6 +211,184 @@ function isActionableTask(name: string): boolean {
 }
 
 /**
+ * Task app tag for fullstack projects
+ */
+export type TaskAppTag = 'FE' | 'BE' | 'INT';
+
+/**
+ * Task with app targeting information for fullstack projects
+ */
+export interface ParsedFullstackTask {
+  name: string;
+  description: string;
+  appTag?: TaskAppTag;
+  appTarget?: 'frontend' | 'backend' | 'unified';
+  files?: string[];
+  dependencies?: string[];
+  acceptanceCriteria?: string[];
+  testPlan?: string;
+}
+
+/**
+ * Parse task tag from task name
+ * e.g., "Task 1.1 [FE]: Create Button component" -> 'FE'
+ *
+ * @param taskName - The task name to parse
+ * @returns The parsed app tag or undefined
+ */
+export function parseTaskTag(taskName: string): TaskAppTag | undefined {
+  const tagMatch = taskName.match(/\[(FE|BE|INT)\]/i);
+  if (tagMatch) {
+    return tagMatch[1].toUpperCase() as TaskAppTag;
+  }
+  return undefined;
+}
+
+/**
+ * Derive app target from tag
+ *
+ * @param tag - The task tag
+ * @returns The app target
+ */
+export function tagToAppTarget(tag: TaskAppTag): 'frontend' | 'backend' | 'unified' {
+  switch (tag) {
+    case 'FE': return 'frontend';
+    case 'BE': return 'backend';
+    case 'INT': return 'unified';
+  }
+}
+
+/**
+ * Validation result for fullstack task
+ */
+export interface FullstackTaskValidation {
+  valid: boolean;
+  issues: string[];
+}
+
+/**
+ * Validate task has proper app targeting for fullstack projects
+ *
+ * @param task - The parsed task to validate
+ * @returns Validation result with issues
+ */
+export function validateFullstackTask(task: ParsedFullstackTask): FullstackTaskValidation {
+  const issues: string[] = [];
+
+  if (!task.appTag) {
+    issues.push(`Task "${task.name.slice(0, 50)}" missing [FE], [BE], or [INT] tag`);
+  }
+
+  if (!task.appTarget) {
+    issues.push(`Task "${task.name.slice(0, 50)}" missing App: field (frontend/backend/unified)`);
+  }
+
+  // Validate consistency between tag and target
+  if (task.appTag && task.appTarget) {
+    const expectedTarget = tagToAppTarget(task.appTag);
+    if (task.appTarget !== expectedTarget) {
+      issues.push(`Task "${task.name.slice(0, 50)}" has [${task.appTag}] tag but App: is "${task.appTarget}" (expected "${expectedTarget}")`);
+    }
+  }
+
+  // Validate file paths match app
+  if (task.files && task.appTag === 'FE') {
+    const invalidFiles = task.files.filter(f => !f.includes('frontend'));
+    if (invalidFiles.length > 0) {
+      issues.push(`[FE] task has files outside apps/frontend: ${invalidFiles.slice(0, 2).join(', ')}`);
+    }
+  }
+  if (task.files && task.appTag === 'BE') {
+    const invalidFiles = task.files.filter(f => !f.includes('backend'));
+    if (invalidFiles.length > 0) {
+      issues.push(`[BE] task has files outside apps/backend: ${invalidFiles.slice(0, 2).join(', ')}`);
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
+/**
+ * Validate all tasks in a fullstack plan
+ *
+ * @param plan - The plan content
+ * @returns Validation result with all issues
+ */
+export function validateFullstackPlan(plan: string): {
+  valid: boolean;
+  issues: string[];
+  stats: {
+    totalTasks: number;
+    feTasks: number;
+    beTasks: number;
+    intTasks: number;
+    untaggedTasks: number;
+  };
+} {
+  const issues: string[] = [];
+  let totalTasks = 0;
+  let feTasks = 0;
+  let beTasks = 0;
+  let intTasks = 0;
+  let untaggedTasks = 0;
+
+  // Find all task headers
+  const taskPattern = /^#{2,4}\s*Task\s+(?:[\d.]+[:\s]+)?(.+)$/gim;
+  let match;
+
+  while ((match = taskPattern.exec(plan)) !== null) {
+    totalTasks++;
+    const taskName = match[1].trim();
+    const tag = parseTaskTag(taskName);
+
+    if (tag) {
+      switch (tag) {
+        case 'FE': feTasks++; break;
+        case 'BE': beTasks++; break;
+        case 'INT': intTasks++; break;
+      }
+    } else {
+      untaggedTasks++;
+      // Only report first few untagged tasks
+      if (untaggedTasks <= 3) {
+        issues.push(`Task missing tag: "${taskName.slice(0, 50)}..."`);
+      }
+    }
+  }
+
+  // Report summary if many untagged
+  if (untaggedTasks > 3) {
+    issues.push(`... and ${untaggedTasks - 3} more tasks missing tags`);
+  }
+
+  // Check for balance
+  if (totalTasks > 0 && feTasks === 0) {
+    issues.push('No frontend [FE] tasks found in fullstack plan');
+  }
+  if (totalTasks > 0 && beTasks === 0) {
+    issues.push('No backend [BE] tasks found in fullstack plan');
+  }
+  if (totalTasks > 0 && intTasks === 0) {
+    issues.push('No integration [INT] tasks found - consider adding integration tests');
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+    stats: {
+      totalTasks,
+      feTasks,
+      beTasks,
+      intTasks,
+      untaggedTasks,
+    },
+  };
+}
+
+/**
  * Extract task description from content following a task header
  *
  * @param content - Content following the task header
@@ -267,8 +447,13 @@ function extractAcceptanceCriteria(content: string): string[] {
 export function detectGarbagePlan(plan: string): { isGarbage: boolean; reason?: string } {
   const planLower = plan.toLowerCase();
 
-  // Phrases that indicate Claude's thinking, not actual plan content
-  const garbagePhrases = [
+  // Get just the first ~500 chars to check for intro meta-commentary
+  // This is where Claude's "thinking" typically appears
+  const planStart = planLower.slice(0, 500);
+
+  // Phrases that indicate Claude's thinking when at the START of output
+  // These are problematic only in the intro, not in plan content
+  const introGarbagePhrases = [
     'let me ',
     'i will ',
     'i\'ll ',
@@ -277,25 +462,44 @@ export function detectGarbagePlan(plan: string): { isGarbage: boolean; reason?: 
     'let me launch',
     'let me create',
     'let me write',
-    'comprehensive understanding',
     'let me analyze',
     'based on my analysis',
     'before i proceed',
     'i\'ve created',
     'i\'ve analyzed',
-    'i should',
+    'i should ',
     'i need to',
     'first, i',
-    'the plan is saved',
-    'saved to',
-    'saved at',
   ];
 
-  for (const phrase of garbagePhrases) {
+  // Check only the intro for thinking phrases
+  for (const phrase of introGarbagePhrases) {
+    if (planStart.includes(phrase)) {
+      return {
+        isGarbage: true,
+        reason: `Plan starts with Claude's thinking ("${phrase}") instead of actual plan content`,
+      };
+    }
+  }
+
+  // These phrases indicate the plan was saved elsewhere, not output directly
+  // Check the entire plan for these since they're unambiguous meta-commentary
+  const metaCommentaryPhrases = [
+    'the plan is saved',
+    'the plan has been saved',
+    'i\'ve saved the plan',
+    'plan saved to',
+    'saved the plan to',
+    'created the plan at',
+    'plan is now available at',
+    '.claude/plans/',  // Reference to Claude's internal plan storage
+  ];
+
+  for (const phrase of metaCommentaryPhrases) {
     if (planLower.includes(phrase)) {
       return {
         isGarbage: true,
-        reason: `Plan contains Claude's thinking ("${phrase}") instead of actual plan content`,
+        reason: `Plan contains meta-commentary ("${phrase}") instead of actual plan content`,
       };
     }
   }
@@ -711,6 +915,7 @@ export async function runPlanMode(
       const plan = await createPlan(
         state.specification!,
         context,
+        spec.language,
         (msg) => onProgress?.('create-plan', msg)
       );
 
@@ -720,6 +925,27 @@ export async function runPlanMode(
         planLength: plan.length,
         planPreview: plan.slice(0, 500),
       });
+
+      // Validate fullstack plan structure
+      if (spec.language === 'fullstack') {
+        onProgress?.('create-plan', 'Validating fullstack plan structure...');
+        const validation = validateFullstackPlan(plan);
+
+        await logger.info('plan-generation', 'fullstack_validation', 'Fullstack plan validation', {
+          valid: validation.valid,
+          stats: validation.stats,
+          issueCount: validation.issues.length,
+        });
+
+        if (!validation.valid) {
+          onProgress?.('create-plan', `Fullstack plan validation warnings: ${validation.issues.length} issues`);
+          for (const issue of validation.issues.slice(0, 3)) {
+            onProgress?.('create-plan', `  - ${issue}`);
+          }
+        } else {
+          onProgress?.('create-plan', `Fullstack plan validated: ${validation.stats.feTasks} FE, ${validation.stats.beTasks} BE, ${validation.stats.intTasks} INT tasks`);
+        }
+      }
     }
 
     // Run consensus loop
@@ -732,6 +958,8 @@ export async function runPlanMode(
       {
         projectDir,
         config: consensusConfig,
+        isFullstack: spec.language === 'fullstack',
+        language: spec.language,
         onIteration: (iteration, result) => {
           onProgress?.(
             'consensus',

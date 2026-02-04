@@ -1,18 +1,20 @@
 /**
  * Authentication orchestration module
- * Coordinates authentication for Claude CLI, OpenAI API, and Gemini API
+ * Coordinates authentication for Claude CLI, OpenAI API, Gemini API, and Grok API
  */
 
 import { checkClaudeCLIAuth, authenticateClaude, logoutClaude, type ClaudeAuthStatus } from './claude.js';
 import { checkOpenAIAuth, authenticateOpenAI, logoutOpenAI, type OpenAIAuthStatus } from './openai.js';
 import { checkGeminiAuth, authenticateGemini, logoutGemini, type GeminiAuthStatus } from './gemini.js';
-import { clearAllCredentials } from './keychain.js';
+import { checkGrokAuth, authenticateGrok, logoutGrok, type GrokAuthStatus } from './grok.js';
+import { clearAllCredentials, deleteCredential } from './keychain.js';
 import type { AuthStatus } from '../types/index.js';
 
 // Re-export individual auth modules
 export * from './claude.js';
 export * from './openai.js';
 export * from './gemini.js';
+export * from './grok.js';
 export * from './keychain.js';
 export * from './server.js';
 
@@ -23,6 +25,7 @@ export interface CombinedAuthStatus {
   claude: ClaudeAuthStatus;
   openai: OpenAIAuthStatus;
   gemini: GeminiAuthStatus;
+  grok: GrokAuthStatus;
   fullyAuthenticated: boolean;
   hasArbitrator: boolean;
 }
@@ -31,18 +34,20 @@ export interface CombinedAuthStatus {
  * Get the authentication status for all services
  */
 export async function getAuthStatus(): Promise<CombinedAuthStatus> {
-  const [claudeStatus, openaiStatus, geminiStatus] = await Promise.all([
+  const [claudeStatus, openaiStatus, geminiStatus, grokStatus] = await Promise.all([
     checkClaudeCLIAuth(),
     checkOpenAIAuth(),
     checkGeminiAuth(),
+    checkGrokAuth(),
   ]);
 
   return {
     claude: claudeStatus,
     openai: openaiStatus,
     gemini: geminiStatus,
+    grok: grokStatus,
     fullyAuthenticated: claudeStatus.authenticated && openaiStatus.authenticated,
-    hasArbitrator: geminiStatus.authenticated || openaiStatus.authenticated,
+    hasArbitrator: geminiStatus.authenticated || openaiStatus.authenticated || grokStatus.authenticated,
   };
 }
 
@@ -66,6 +71,10 @@ export async function getAuthStatusForDisplay(): Promise<AuthStatus> {
     gemini: {
       authenticated: status.gemini.authenticated,
       keyLastFour: status.gemini.keyLastFour,
+    },
+    grok: {
+      authenticated: status.grok.authenticated,
+      keyLastFour: status.grok.keyLastFour,
     },
   };
 }
@@ -109,11 +118,11 @@ export async function ensureAuthenticated(): Promise<boolean> {
 /**
  * Authenticate a specific service
  *
- * @param service - The service to authenticate ('claude', 'openai', 'gemini', or 'all')
+ * @param service - The service to authenticate ('claude', 'openai', 'gemini', 'grok', or 'all')
  * @returns True if authentication was successful
  */
 export async function authenticateService(
-  service: 'claude' | 'openai' | 'gemini' | 'all'
+  service: 'claude' | 'openai' | 'gemini' | 'grok' | 'all'
 ): Promise<boolean> {
   switch (service) {
     case 'claude':
@@ -122,6 +131,8 @@ export async function authenticateService(
       return authenticateOpenAI();
     case 'gemini':
       return authenticateGemini();
+    case 'grok':
+      return authenticateGrok();
     case 'all':
       return ensureAuthenticated();
   }
@@ -130,9 +141,9 @@ export async function authenticateService(
 /**
  * Logout from a specific service or all services
  *
- * @param service - The service to logout from ('claude', 'openai', 'gemini', or 'all')
+ * @param service - The service to logout from ('claude', 'openai', 'gemini', 'grok', or 'all')
  */
-export async function logout(service: 'claude' | 'openai' | 'gemini' | 'all'): Promise<void> {
+export async function logout(service: 'claude' | 'openai' | 'gemini' | 'grok' | 'all'): Promise<void> {
   switch (service) {
     case 'claude':
       await logoutClaude();
@@ -143,8 +154,13 @@ export async function logout(service: 'claude' | 'openai' | 'gemini' | 'all'): P
     case 'gemini':
       await logoutGemini();
       break;
+    case 'grok':
+      await logoutGrok();
+      break;
     case 'all':
       await clearAllCredentials();
+      // Also clear grok credential
+      await deleteCredential('grok-api');
       console.log('All credentials removed.');
       break;
   }
@@ -156,7 +172,7 @@ export async function logout(service: 'claude' | 'openai' | 'gemini' | 'all'): P
  * @param service - The service to check
  * @returns True if the service is authenticated
  */
-export async function isAuthenticated(service: 'claude' | 'openai' | 'gemini' | 'both' | 'all'): Promise<boolean> {
+export async function isAuthenticated(service: 'claude' | 'openai' | 'gemini' | 'grok' | 'both' | 'all'): Promise<boolean> {
   const status = await getAuthStatus();
 
   switch (service) {
@@ -166,6 +182,8 @@ export async function isAuthenticated(service: 'claude' | 'openai' | 'gemini' | 
       return status.openai.authenticated;
     case 'gemini':
       return status.gemini.authenticated;
+    case 'grok':
+      return status.grok.authenticated;
     case 'both':
       return status.fullyAuthenticated;
     case 'all':

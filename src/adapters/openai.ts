@@ -256,15 +256,21 @@ export async function listAvailableModels(): Promise<string[]> {
  */
 export async function expandIdea(
   idea: string,
-  language: 'python' | 'typescript'
+  language: 'python' | 'typescript' | 'fullstack'
 ): Promise<string> {
   const client = await createClient();
+
+  const languageDesc = language === 'fullstack'
+    ? 'React (TypeScript) frontend with FastAPI (Python) backend'
+    : language === 'python'
+    ? 'Python'
+    : 'TypeScript';
 
   const prompt = `You are a senior software architect. A user wants to build a project with the following idea:
 
 "${idea}"
 
-The project will be implemented in ${language === 'python' ? 'Python' : 'TypeScript'}.
+The project will be implemented in ${languageDesc}.
 
 Expand this into a complete software specification including:
 
