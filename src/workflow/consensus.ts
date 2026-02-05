@@ -14,6 +14,7 @@ import type {
   AppConsensusScores,
   CorrectionRecord,
 } from '../types/consensus.js';
+import type { OutputLanguage } from '../types/project.js';
 import { DEFAULT_CONSENSUS_CONFIG } from '../types/consensus.js';
 import { requestConsensus as requestOpenAIConsensus } from '../adapters/openai.js';
 import { requestConsensus as requestGeminiConsensus, requestArbitration as requestGeminiArbitration } from '../adapters/gemini.js';
@@ -36,7 +37,7 @@ export interface ConsensusOptions {
   /** Whether this is a fullstack project (enables per-app tracking) */
   isFullstack?: boolean;
   /** Project language for revision prompts */
-  language?: 'python' | 'typescript' | 'fullstack';
+  language?: OutputLanguage;
   onIteration?: (iteration: number, result: ConsensusResult) => void;
   onRevision?: (iteration: number, revisedPlan: string) => void;
   onConcerns?: (concerns: string[], recommendations: string[]) => void;
@@ -947,7 +948,7 @@ export async function runOptimizedConsensusProcess(
   } = options;
 
   // Derive language from isFullstack for revision prompts
-  const language: 'python' | 'typescript' | 'fullstack' = isFullstack ? 'fullstack' : 'python';
+  const language: OutputLanguage = isFullstack ? 'fullstack' : 'python';
 
   const {
     threshold = DEFAULT_CONSENSUS_CONFIG.threshold,

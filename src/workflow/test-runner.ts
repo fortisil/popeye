@@ -38,6 +38,8 @@ export const DEFAULT_TEST_COMMANDS: Record<OutputLanguage, string> = {
   python: 'python -m pytest tests/ -v',
   typescript: 'npm test',
   fullstack: 'npm run test:all',  // Runs both frontend and backend tests via workspace.json
+  website: 'npm test',  // Next.js testing
+  all: 'npm run test:all',  // Runs all app tests via workspace.json
 };
 
 /**
@@ -83,6 +85,23 @@ export function buildTestCommand(config: TestConfig): string {
     case 'fullstack': {
       // Fullstack projects use workspace.json commands
       // Default to running both frontend and backend tests
+      return 'npm run test:all';
+    }
+
+    case 'website': {
+      // Website projects use Next.js testing (Vitest/Jest)
+      const parts = ['npm', 'test'];
+
+      if (coverage) {
+        parts.push('--', '--coverage');
+      }
+
+      return parts.join(' ');
+    }
+
+    case 'all': {
+      // All projects use workspace.json commands
+      // Runs frontend, backend, and website tests
       return 'npm run test:all';
     }
   }
@@ -172,6 +191,57 @@ export function parseTestOutput(output: string, language: OutputLanguage): TestR
       }
       const jestFailedMatches = output.matchAll(/✕\s+(.+)/g);
       for (const match of jestFailedMatches) {
+        failedTests.push(match[1].trim());
+      }
+      break;
+    }
+
+    case 'website': {
+      // Website uses same parsing as typescript (Jest/Vitest)
+      const summaryMatchWeb = output.match(/Tests:\s*(?:(\d+)\s+failed,\s*)?(\d+)\s+passed,\s*(\d+)\s+total/);
+
+      if (summaryMatchWeb) {
+        failed = summaryMatchWeb[1] ? parseInt(summaryMatchWeb[1], 10) : 0;
+        passed = parseInt(summaryMatchWeb[2], 10);
+        total = parseInt(summaryMatchWeb[3], 10);
+      }
+
+      // Extract failed test names
+      const failedTestMatchesWeb = output.matchAll(/✕\s+(.+)/g);
+      for (const match of failedTestMatchesWeb) {
+        failedTests.push(match[1].trim());
+      }
+      break;
+    }
+
+    case 'all': {
+      // All projects combine pytest, frontend jest, and website jest output
+      // Parse all formats
+      const pytestMatchAll = output.match(/(\d+)\s+passed/);
+      const pytestFailedMatchAll = output.match(/(\d+)\s+failed/);
+      // Match multiple jest outputs
+      const jestMatchesAll = output.matchAll(/Tests:\s*(?:(\d+)\s+failed,\s*)?(\d+)\s+passed,\s*(\d+)\s+total/g);
+
+      if (pytestMatchAll) {
+        passed += parseInt(pytestMatchAll[1], 10);
+      }
+      if (pytestFailedMatchAll) {
+        failed += parseInt(pytestFailedMatchAll[1], 10);
+      }
+      for (const jestMatchAll of jestMatchesAll) {
+        failed += jestMatchAll[1] ? parseInt(jestMatchAll[1], 10) : 0;
+        passed += parseInt(jestMatchAll[2], 10);
+      }
+
+      total = passed + failed;
+
+      // Extract failed test names from all test frameworks
+      const pytestFailedMatchesAll = output.matchAll(/FAILED\s+([^\s]+)/g);
+      for (const match of pytestFailedMatchesAll) {
+        failedTests.push(match[1]);
+      }
+      const jestFailedMatchesAll = output.matchAll(/✕\s+(.+)/g);
+      for (const match of jestFailedMatchesAll) {
         failedTests.push(match[1].trim());
       }
       break;
@@ -342,6 +412,12 @@ export async function runTests(
       return runTypeScriptTests(cwd, config);
     case 'fullstack':
       return runFullstackTests(cwd, config);
+    case 'website':
+      // Website uses same testing as TypeScript (Next.js with Jest/Vitest)
+      return runTypeScriptTests(cwd, config);
+    case 'all':
+      // All projects use fullstack testing (runs all app tests)
+      return runFullstackTests(cwd, config);
   }
 }
 
@@ -427,6 +503,79 @@ export async function testsExist(
         }
 
         return hasBackendTests || hasFrontendTests;
+      }
+
+      case 'website': {
+        // Check for tests in website app (similar to TypeScript)
+        const testsDir = path.join(cwd, 'tests');
+        const testsDirAlt = path.join(cwd, '__tests__');
+
+        try {
+          await fs.access(testsDir);
+          return true;
+        } catch {
+          try {
+            await fs.access(testsDirAlt);
+            return true;
+          } catch {
+            // Check for test files in src
+            const srcDir = path.join(cwd, 'src');
+            try {
+              const files = await fs.readdir(srcDir, { recursive: true });
+              return files.some(
+                (f) =>
+                  (f.toString().endsWith('.test.ts') ||
+                    f.toString().endsWith('.test.tsx') ||
+                    f.toString().endsWith('.spec.ts') ||
+                    f.toString().endsWith('.spec.tsx'))
+              );
+            } catch {
+              return false;
+            }
+          }
+        }
+      }
+
+      case 'all': {
+        // Check for tests in frontend, backend, and website
+        const backendTestsDir = path.join(cwd, 'apps', 'backend', 'tests');
+        const frontendSrcDir = path.join(cwd, 'apps', 'frontend', 'src');
+        const websiteSrcDir = path.join(cwd, 'apps', 'website', 'src');
+
+        let hasBackendTests = false;
+        let hasFrontendTests = false;
+        let hasWebsiteTests = false;
+
+        try {
+          await fs.access(backendTestsDir);
+          hasBackendTests = true;
+        } catch {
+          // No backend tests directory
+        }
+
+        try {
+          const files = await fs.readdir(frontendSrcDir, { recursive: true });
+          hasFrontendTests = files.some(
+            (f) => f.toString().endsWith('.test.ts') || f.toString().endsWith('.spec.ts')
+          );
+        } catch {
+          // No frontend test files
+        }
+
+        try {
+          const files = await fs.readdir(websiteSrcDir, { recursive: true });
+          hasWebsiteTests = files.some(
+            (f) =>
+              f.toString().endsWith('.test.ts') ||
+              f.toString().endsWith('.test.tsx') ||
+              f.toString().endsWith('.spec.ts') ||
+              f.toString().endsWith('.spec.tsx')
+          );
+        } catch {
+          // No website test files
+        }
+
+        return hasBackendTests || hasFrontendTests || hasWebsiteTests;
       }
     }
   } catch {

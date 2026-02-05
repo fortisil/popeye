@@ -7,6 +7,7 @@
 
 import OpenAI from 'openai';
 import type { ConsensusResult, ArbitrationResult } from '../types/consensus.js';
+import type { OutputLanguage } from '../types/project.js';
 import { getGrokToken, GROK_API_URL } from '../auth/grok.js';
 import { DEFAULT_GROK_MODEL } from '../types/consensus.js';
 
@@ -409,7 +410,7 @@ export async function listAvailableModels(): Promise<string[]> {
  */
 export async function expandIdea(
   idea: string,
-  language: 'python' | 'typescript' | 'fullstack'
+  language: OutputLanguage
 ): Promise<string> {
   const client = await createClient();
 

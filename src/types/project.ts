@@ -8,8 +8,55 @@ import { z } from 'zod';
 /**
  * Supported output languages for generated projects
  */
-export const OutputLanguageSchema = z.enum(['python', 'typescript', 'fullstack']);
+/**
+ * Supported output languages for generated projects
+ * - python: Backend only (FastAPI)
+ * - typescript: Frontend only (React/Vite)
+ * - fullstack: FE + BE
+ * - website: Website only (Next.js SSG/SSR)
+ * - all: FE + BE + Website (everything)
+ */
+export const OutputLanguageSchema = z.enum([
+  'python',
+  'typescript',
+  'fullstack',
+  'website',
+  'all',
+]);
 export type OutputLanguage = z.infer<typeof OutputLanguageSchema>;
+
+/**
+ * App types that can be generated
+ */
+export type AppType = 'frontend' | 'backend' | 'website';
+
+/**
+ * Maps a language to the apps it will generate
+ *
+ * @param language - The output language
+ * @returns Array of app types to generate
+ */
+export function languageToApps(language: OutputLanguage): AppType[] {
+  const mapping: Record<OutputLanguage, AppType[]> = {
+    python: ['backend'],
+    typescript: ['frontend'],
+    fullstack: ['frontend', 'backend'],
+    website: ['website'],
+    all: ['frontend', 'backend', 'website'],
+  };
+  return mapping[language];
+}
+
+/**
+ * Checks if a language generates a specific app type
+ *
+ * @param language - The output language
+ * @param app - The app type to check
+ * @returns True if the language generates the app
+ */
+export function hasApp(language: OutputLanguage, app: AppType): boolean {
+  return languageToApps(language).includes(app);
+}
 
 /**
  * Commands configuration for a workspace app
@@ -56,6 +103,10 @@ export interface WorkspaceShared {
   contracts?: string;
   /** Generator command for FE client from OpenAPI */
   contractsGenerator?: string;
+  /** Shared UI components package path */
+  ui?: string;
+  /** Design tokens package path */
+  designTokens?: string;
 }
 
 /**
@@ -78,18 +129,104 @@ export interface WorkspaceDocker {
 }
 
 /**
- * Workspace configuration for fullstack projects
+ * Workspace configuration for fullstack/website/all projects
  */
 export interface WorkspaceConfig {
   version: '1.0';
   apps: {
     frontend?: WorkspaceApp;
     backend?: WorkspaceApp;
+    website?: WorkspaceApp;
   };
   shared?: WorkspaceShared;
   /** Repo-level commands that orchestrate across apps */
   commands: WorkspaceCommands;
   docker: WorkspaceDocker;
+}
+
+/**
+ * Brand colors for website design
+ */
+export interface WebsiteBrandColors {
+  primary: string;
+  secondary: string;
+  accent: string;
+  background: string;
+  foreground: string;
+}
+
+/**
+ * Typography configuration for website
+ */
+export interface WebsiteTypography {
+  headingFont: string;
+  bodyFont: string;
+}
+
+/**
+ * SEO configuration for website
+ */
+export interface WebsiteSeo {
+  title: string;
+  description: string;
+  keywords: string[];
+  ogImage?: string;
+  twitterHandle?: string;
+  locale: string;
+}
+
+/**
+ * Page configuration for website
+ */
+export interface WebsitePage {
+  name: string;
+  path: string;
+  type: 'landing' | 'pricing' | 'docs' | 'blog' | 'changelog' | 'legal';
+  seo?: {
+    title?: string;
+    description?: string;
+  };
+}
+
+/**
+ * Call-to-action configuration
+ */
+export interface WebsiteCta {
+  primary: {
+    text: string;
+    href: string;
+  };
+  secondary?: {
+    text: string;
+    href: string;
+  };
+}
+
+/**
+ * Feature flags for website
+ */
+export interface WebsiteFeatures {
+  analytics?: boolean;
+  newsletter?: boolean;
+  mdxBlog?: boolean;
+  docsSearch?: boolean;
+}
+
+/**
+ * Website specification for Next.js marketing sites
+ */
+export interface WebsiteSpec {
+  version: '1.0';
+  brand: {
+    name: string;
+    tagline?: string;
+    colors: WebsiteBrandColors;
+    typography: WebsiteTypography;
+  };
+  seo: WebsiteSeo;
+  pages: WebsitePage[];
+  cta: WebsiteCta;
+  features?: WebsiteFeatures;
 }
 
 /**

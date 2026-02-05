@@ -22,6 +22,16 @@ import {
   validateFullstackProject,
   getFullstackProjectFiles,
 } from './fullstack.js';
+import {
+  generateWebsiteProject,
+  validateWebsiteProject,
+  getWebsiteProjectFiles,
+} from './website.js';
+import {
+  generateAllProject,
+  validateAllProject,
+  getAllProjectFiles,
+} from './all.js';
 
 // Re-export (explicitly to avoid name conflicts)
 export {
@@ -45,7 +55,20 @@ export {
   generateFullstackProject,
   validateFullstackProject,
   getFullstackProjectFiles,
+  type FullstackGeneratorOptions,
 } from './fullstack.js';
+export {
+  generateWebsiteProject,
+  validateWebsiteProject,
+  getWebsiteProjectFiles,
+  type WebsiteGeneratorOptions,
+} from './website.js';
+export {
+  generateAllProject,
+  validateAllProject,
+  getAllProjectFiles,
+  type AllGeneratorOptions,
+} from './all.js';
 export * from './templates/index.js';
 
 /**
@@ -66,6 +89,10 @@ export async function generateProject(
       return generateTypeScriptProject(spec, outputDir);
     case 'fullstack':
       return generateFullstackProject(spec, outputDir);
+    case 'website':
+      return generateWebsiteProject(spec, outputDir);
+    case 'all':
+      return generateAllProject(spec, outputDir);
     default:
       return {
         success: false,
@@ -97,6 +124,10 @@ export async function validateProject(
       return validateTypeScriptProject(projectDir);
     case 'fullstack':
       return validateFullstackProject(projectDir);
+    case 'website':
+      return validateWebsiteProject(projectDir);
+    case 'all':
+      return validateAllProject(projectDir);
     default:
       return {
         valid: false,
@@ -122,7 +153,14 @@ export async function addModule(
     case 'python':
       return addPythonModule(projectDir, moduleName);
     case 'typescript':
+    case 'website':
       return addTypeScriptModule(projectDir, moduleName);
+    case 'fullstack':
+    case 'all':
+      // For workspace projects, determine which app to add to
+      throw new Error(
+        'Use addModule with specific app path for workspace projects: apps/frontend or apps/backend'
+      );
     default:
       throw new Error(`Unsupported language: ${language}`);
   }
@@ -143,6 +181,10 @@ export function getProjectFiles(projectName: string, language: OutputLanguage): 
       return getTypeScriptProjectFiles(projectName);
     case 'fullstack':
       return getFullstackProjectFiles(projectName);
+    case 'website':
+      return getWebsiteProjectFiles(projectName);
+    case 'all':
+      return getAllProjectFiles(projectName);
     default:
       return [];
   }
@@ -162,6 +204,10 @@ export function getTestCommand(language: OutputLanguage): string {
       return 'npm test';
     case 'fullstack':
       return 'cd apps/backend && pytest && cd ../frontend && npm test';
+    case 'website':
+      return 'npm test';
+    case 'all':
+      return 'npm run test:all';
     default:
       return 'echo "No test command configured"';
   }
@@ -181,6 +227,10 @@ export function getBuildCommand(language: OutputLanguage): string {
       return 'npm run build';
     case 'fullstack':
       return 'cd apps/backend && pip install -e . && cd ../frontend && npm run build';
+    case 'website':
+      return 'npm run build';
+    case 'all':
+      return 'npm run build';
     default:
       return 'echo "No build command configured"';
   }
@@ -200,6 +250,10 @@ export function getLintCommand(language: OutputLanguage): string {
       return 'npm run lint';
     case 'fullstack':
       return 'cd apps/backend && ruff check . && cd ../frontend && npm run lint';
+    case 'website':
+      return 'npm run lint';
+    case 'all':
+      return 'npm run lint:all';
     default:
       return 'echo "No lint command configured"';
   }

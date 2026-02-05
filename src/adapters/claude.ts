@@ -7,6 +7,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'os';
 import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { OutputLanguage } from '../types/project.js';
 
 /**
  * Options for executing a prompt through Claude
@@ -900,7 +901,7 @@ function isConversationalResponse(response: string): boolean {
 function buildPlanPrompt(
   specification: string,
   context: string,
-  language: 'python' | 'typescript' | 'fullstack'
+  language: OutputLanguage
 ): string {
   // Base instructions that apply to all projects
   const baseInstructions = `
@@ -1014,6 +1015,222 @@ Your response MUST be the complete plan in this EXACT format:
 5. **Include at least 3 milestones** with tasks distributed across FE/BE/INT
 6. Each task MUST start with an action verb: Implement, Create, Build, Add, Configure, Set up, Write, Design, etc.
 7. Each task MUST be specific and implementable
+
+IMPORTANT: Output the COMPLETE plan now. Start with "# Development Plan:" on the first line.
+`.trim();
+  }
+
+  // "All" project format (FE + BE + Website)
+  if (language === 'all') {
+    return `
+${baseInstructions}
+
+## Project Type: ALL (Frontend + Backend + Website)
+- **Frontend**: React + Vite + TypeScript + Tailwind CSS (apps/frontend)
+- **Backend**: FastAPI (Python) + PostgreSQL (apps/backend)
+- **Website**: Next.js SSG/SSR marketing site (apps/website)
+- **Shared**: Design tokens, UI components (packages/)
+- **Structure**: Monorepo with apps/ and packages/
+
+## Specification
+${specification}
+
+${context ? `## Additional Context\n${context}` : ''}
+
+## Required Plan Format for All-in-One Projects
+
+Your response MUST be the complete plan in this EXACT format:
+
+# Development Plan: [Project Name]
+
+## Overview
+[2-3 sentence summary covering app, API, and website]
+
+## Architecture
+- **Frontend App**: React SPA at apps/frontend/
+- **Backend API**: FastAPI service at apps/backend/
+- **Marketing Website**: Next.js at apps/website/
+- **Shared Packages**: packages/ui, packages/design-tokens
+
+---
+
+## Milestone 1: [Name]
+**Description**: [What this milestone achieves]
+
+### Frontend Tasks
+
+#### Task 1.1 [FE]: [Actionable task name]
+**App**: frontend
+**Files**:
+- \`apps/frontend/src/components/...\`
+**Dependencies**: None
+**Acceptance Criteria**:
+- [ ] Criterion 1
+
+### Backend Tasks
+
+#### Task 1.2 [BE]: [Actionable task name]
+**App**: backend
+**Files**:
+- \`apps/backend/src/...\`
+**Dependencies**: None
+**Acceptance Criteria**:
+- [ ] Criterion 1
+
+### Website Tasks
+
+#### Task 1.3 [WEB]: [Actionable task name]
+**App**: website
+**Files**:
+- \`apps/website/src/app/...\`
+**Dependencies**: None
+**Acceptance Criteria**:
+- [ ] Page renders with proper SEO metadata
+- [ ] Page passes Lighthouse performance check
+
+### Integration Tasks
+
+#### Task 1.4 [INT]: [Actionable task name]
+**App**: unified
+**Dependencies**: Task 1.1, Task 1.2
+**Acceptance Criteria**:
+- [ ] Integration criterion
+
+---
+
+## Milestone 2: [Name]
+[Continue same pattern...]
+
+---
+
+## Test Plan
+
+### Frontend Tests (apps/frontend)
+- Vitest + Testing Library for unit tests
+- Playwright for E2E
+
+### Backend Tests (apps/backend)
+- pytest for unit tests
+- pytest + TestClient for integration
+
+### Website Tests (apps/website)
+- Vitest for component tests
+- SEO acceptance tests (sitemap, robots, metadata)
+- Lighthouse performance checks
+
+### Integration Tests
+- API contract validation
+- E2E user flows across all apps
+
+## Risks & Mitigations
+[Include frontend, backend, website, and integration risks separately]
+
+---
+
+## CRITICAL REQUIREMENTS FOR "ALL" PROJECTS:
+1. **Tag every task** with [FE], [BE], [WEB], or [INT]
+   - [FE] = Frontend app task
+   - [BE] = Backend API task
+   - [WEB] = Marketing website task
+   - [INT] = Integration/unified task
+2. **Specify App field** for each task (frontend, backend, website, or unified)
+3. **List exact file paths** under the appropriate apps/ or packages/ directory
+4. **Group tasks** under "Frontend Tasks", "Backend Tasks", "Website Tasks", or "Integration Tasks" headers
+5. **Website tasks MUST include SEO requirements** in acceptance criteria
+6. **Website must NOT import from apps/frontend/** - use packages/ui instead
+7. Each task MUST start with an action verb
+8. Include at least 3 milestones
+
+IMPORTANT: Output the COMPLETE plan now. Start with "# Development Plan:" on the first line.
+`.trim();
+  }
+
+  // Website-only format
+  if (language === 'website') {
+    return `
+${baseInstructions}
+
+## Project Type: WEBSITE (Next.js Marketing Site)
+- **Framework**: Next.js 14+ App Router
+- **Styling**: Tailwind CSS
+- **Content**: MDX for blog/docs
+- **SEO**: Sitemap, robots.txt, OpenGraph
+
+## Specification
+${specification}
+
+${context ? `## Additional Context\n${context}` : ''}
+
+## Required Plan Format for Website Projects
+
+Your response MUST be the complete plan in this EXACT format:
+
+# Development Plan: [Project Name]
+
+## Overview
+[2-3 sentence summary of the marketing website]
+
+## Architecture
+- **Framework**: Next.js App Router
+- **Styling**: Tailwind CSS
+- **Content**: MDX for blog posts and documentation
+- **Deployment**: Vercel/Docker
+
+---
+
+## Milestone 1: [Name]
+**Description**: [What this milestone achieves]
+
+### Task 1.1: [Actionable task name]
+**Files**:
+- \`src/app/page.tsx\`
+- \`src/components/...\`
+**Dependencies**: None
+**Acceptance Criteria**:
+- [ ] Page renders correctly
+- [ ] SEO metadata is properly configured
+- [ ] Page passes Lighthouse performance check (90+ score)
+
+### Task 1.2: [Another actionable task]
+...
+
+---
+
+## Milestone 2: [Name]
+...
+
+---
+
+## SEO Requirements (ALL pages must have)
+
+1. **Metadata exports** in every page.tsx:
+   - title (unique per page)
+   - description
+   - openGraph data
+2. **sitemap.ts** - Auto-generated sitemap
+3. **robots.ts** - robots.txt configuration
+4. **OG images** - Default and per-page OpenGraph images
+5. **Structured data** - JSON-LD where applicable
+
+## Test Plan
+- Vitest for component tests
+- SEO acceptance tests
+- Lighthouse performance audits
+- Accessibility testing
+
+## Risks & Mitigations
+[Include SEO, performance, and content risks]
+
+---
+
+## Requirements for Tasks
+
+1. Each task MUST start with an action verb
+2. Each task MUST include SEO considerations
+3. Each milestone MUST have at least 3-5 specific tasks
+4. The plan MUST have at least 3 milestones
+5. Files to create/modify MUST be listed for each task
+6. Acceptance criteria MUST include SEO requirements where applicable
 
 IMPORTANT: Output the COMPLETE plan now. Start with "# Development Plan:" on the first line.
 `.trim();
@@ -1149,7 +1366,7 @@ IMPORTANT: Output the COMPLETE plan now. Start with "# Development Plan:" on the
 export async function createPlan(
   specification: string,
   context: string = '',
-  language: 'python' | 'typescript' | 'fullstack' = 'python',
+  language: OutputLanguage = 'python',
   onProgress?: (message: string) => void
 ): Promise<ClaudeExecuteResult> {
   const prompt = buildPlanPrompt(specification, context, language);
@@ -1243,7 +1460,7 @@ function buildRevisionPrompt(
   originalPlan: string,
   feedback: string,
   concerns: string[],
-  language: 'python' | 'typescript' | 'fullstack'
+  language: OutputLanguage
 ): string {
   const basePrompt = `
 CRITICAL: You must output the COMPLETE revised plan in your response.
@@ -1301,7 +1518,7 @@ export async function revisePlan(
   originalPlan: string,
   feedback: string,
   concerns: string[],
-  language: 'python' | 'typescript' | 'fullstack' = 'python',
+  language: OutputLanguage = 'python',
   onProgress?: (message: string) => void
 ): Promise<ClaudeExecuteResult> {
   const prompt = buildRevisionPrompt(originalPlan, feedback, concerns, language);

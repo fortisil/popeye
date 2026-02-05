@@ -195,9 +195,9 @@ export interface EscalationDetails {
 }
 
 /**
- * App target for fullstack reviews
+ * App target for fullstack/all reviews
  */
-export type ReviewAppTarget = 'frontend' | 'backend' | 'unified';
+export type ReviewAppTarget = 'frontend' | 'backend' | 'website' | 'unified';
 
 /**
  * Tagged concern/recommendation with app context
@@ -208,11 +208,12 @@ export interface TaggedItem {
 }
 
 /**
- * Per-app consensus scores for fullstack projects
+ * Per-app consensus scores for fullstack/all projects
  */
 export interface AppConsensusScores {
   frontend?: number;
   backend?: number;
+  website?: number;
   unified: number;  // Combined/overall score
 }
 
@@ -253,6 +254,7 @@ export interface FullstackConsensusIteration extends ConsensusIteration {
   appApproved?: {
     frontend?: boolean;
     backend?: boolean;
+    website?: boolean;
     unified: boolean;
   };
 }
@@ -294,6 +296,10 @@ export interface ConsensusTrackingRecord {
   backendScore?: number;
   backendApproved?: boolean;
   backendIterations?: number;
+
+  websiteScore?: number;
+  websiteApproved?: boolean;
+  websiteIterations?: number;
 
   /** All corrections/revisions made */
   corrections: CorrectionRecord[];

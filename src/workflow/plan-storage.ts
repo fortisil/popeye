@@ -2,7 +2,7 @@
  * Plan Storage System
  * Manages plans in markdown files to reduce API calls and maintain tracking
  *
- * Directory Structure for Fullstack Projects:
+ * Directory Structure for Fullstack/All Projects:
  * docs/plans/
  * ├── master/
  * │   ├── plan.md
@@ -13,7 +13,10 @@
  * │   ├── frontend/
  * │   │   ├── feedback.json
  * │   │   └── feedback.md
- * │   └── backend/
+ * │   ├── backend/
+ * │   │   ├── feedback.json
+ * │   │   └── feedback.md
+ * │   └── website/
  * │       ├── feedback.json
  * │       └── feedback.md
  * ├── milestone-1/
@@ -22,13 +25,15 @@
  * │   ├── unified/
  * │   ├── frontend/
  * │   ├── backend/
+ * │   ├── website/
  * │   └── tasks/
  * │       └── task-1/
  * │           ├── plan.md
  * │           ├── metadata.json
  * │           ├── unified/
  * │           ├── frontend/
- * │           └── backend/
+ * │           ├── backend/
+ * │           └── website/
  */
 
 import { promises as fs } from 'node:fs';
@@ -43,7 +48,7 @@ import type {
 /**
  * App target for feedback storage
  */
-export type FeedbackAppTarget = 'frontend' | 'backend' | 'unified';
+export type FeedbackAppTarget = 'frontend' | 'backend' | 'website' | 'unified';
 
 /**
  * Feedback entry from a reviewer
@@ -89,13 +94,15 @@ export interface PlanMetadata {
   consensusScore?: number;
   status: 'draft' | 'reviewing' | 'approved' | 'implemented';
 
-  /** Fullstack-specific tracking */
+  /** Fullstack/All project-specific tracking */
   isFullstack?: boolean;
   frontendScore?: number;
   backendScore?: number;
+  websiteScore?: number;
   unifiedScore?: number;
   frontendApproved?: boolean;
   backendApproved?: boolean;
+  websiteApproved?: boolean;
   unifiedApproved?: boolean;
 
   /** Total iterations for this plan */
@@ -121,18 +128,20 @@ export interface StoredPlan {
 }
 
 /**
- * Fullstack stored plan with per-app feedback
+ * Fullstack/All stored plan with per-app feedback
  */
 export interface FullstackStoredPlan extends StoredPlan {
   /** Per-app feedback */
   frontendFeedback: ReviewerFeedback[];
   backendFeedback: ReviewerFeedback[];
+  websiteFeedback: ReviewerFeedback[];
   unifiedFeedback: ReviewerFeedback[];
 
   /** Per-app revision history */
   appRevisionHistory: {
     frontend: Array<{ version: number; timestamp: string; changes: string; score?: number }>;
     backend: Array<{ version: number; timestamp: string; changes: string; score?: number }>;
+    website: Array<{ version: number; timestamp: string; changes: string; score?: number }>;
     unified: Array<{ version: number; timestamp: string; changes: string; score?: number }>;
   };
 }
@@ -171,13 +180,14 @@ export class PlanStorage {
   }
 
   /**
-   * Initialize app subdirectories (frontend/backend/unified)
+   * Initialize app subdirectories (frontend/backend/website/unified)
    */
   private async initializeAppDirectories(baseDir: string): Promise<void> {
     await fs.mkdir(baseDir, { recursive: true });
     await fs.mkdir(path.join(baseDir, 'unified'), { recursive: true });
     await fs.mkdir(path.join(baseDir, 'frontend'), { recursive: true });
     await fs.mkdir(path.join(baseDir, 'backend'), { recursive: true });
+    await fs.mkdir(path.join(baseDir, 'website'), { recursive: true });
   }
 
   /**
@@ -512,7 +522,7 @@ export class PlanStorage {
   /**
    * Save fullstack feedback with per-app breakdown
    *
-   * Saves feedback to all three directories (unified, frontend, backend)
+   * Saves feedback to all four directories (unified, frontend, backend, website)
    */
   async saveFullstackFeedback(
     feedback: FullstackReviewerFeedback,
@@ -526,7 +536,7 @@ export class PlanStorage {
       return;
     }
 
-    const apps: FeedbackAppTarget[] = ['unified', 'frontend', 'backend'];
+    const apps: FeedbackAppTarget[] = ['unified', 'frontend', 'backend', 'website'];
 
     for (const app of apps) {
       // Extract app-specific concerns and recommendations
@@ -542,6 +552,8 @@ export class PlanStorage {
         ? feedback.appScores.frontend
         : app === 'backend'
         ? feedback.appScores.backend
+        : app === 'website'
+        ? feedback.appScores.website
         : feedback.appScores.unified;
 
       const appFeedback: ReviewerFeedback = {
@@ -623,7 +635,7 @@ export class PlanStorage {
   }
 
   /**
-   * Load all feedback for all apps (fullstack)
+   * Load all feedback for all apps (fullstack/all)
    */
   async loadAllAppFeedback(
     milestoneId: string,
@@ -632,19 +644,21 @@ export class PlanStorage {
     unified: ReviewerFeedback[];
     frontend: ReviewerFeedback[];
     backend: ReviewerFeedback[];
+    website: ReviewerFeedback[];
   }> {
     if (!this.isFullstack) {
       const unified = await this.loadFeedback(milestoneId, taskId);
-      return { unified, frontend: [], backend: [] };
+      return { unified, frontend: [], backend: [], website: [] };
     }
 
-    const [unified, frontend, backend] = await Promise.all([
+    const [unified, frontend, backend, website] = await Promise.all([
       this.loadFeedback(milestoneId, taskId, 'unified'),
       this.loadFeedback(milestoneId, taskId, 'frontend'),
       this.loadFeedback(milestoneId, taskId, 'backend'),
+      this.loadFeedback(milestoneId, taskId, 'website'),
     ]);
 
-    return { unified, frontend, backend };
+    return { unified, frontend, backend, website };
   }
 
   /**
@@ -662,25 +676,27 @@ export class PlanStorage {
   }
 
   /**
-   * Load all master plan feedback (fullstack)
+   * Load all master plan feedback (fullstack/all)
    */
   async loadAllMasterFeedback(): Promise<{
     unified: ReviewerFeedback[];
     frontend: ReviewerFeedback[];
     backend: ReviewerFeedback[];
+    website: ReviewerFeedback[];
   }> {
     if (!this.isFullstack) {
       const unified = await this.loadMasterFeedback();
-      return { unified, frontend: [], backend: [] };
+      return { unified, frontend: [], backend: [], website: [] };
     }
 
-    const [unified, frontend, backend] = await Promise.all([
+    const [unified, frontend, backend, website] = await Promise.all([
       this.loadMasterFeedback('unified'),
       this.loadMasterFeedback('frontend'),
       this.loadMasterFeedback('backend'),
+      this.loadMasterFeedback('website'),
     ]);
 
-    return { unified, frontend, backend };
+    return { unified, frontend, backend, website };
   }
 
   /**
@@ -693,6 +709,7 @@ export class PlanStorage {
         this.clearFeedback(milestoneId, taskId, 'unified'),
         this.clearFeedback(milestoneId, taskId, 'frontend'),
         this.clearFeedback(milestoneId, taskId, 'backend'),
+        this.clearFeedback(milestoneId, taskId, 'website'),
       ]);
       return;
     }
@@ -716,6 +733,7 @@ export class PlanStorage {
         this.clearMasterFeedback('unified'),
         this.clearMasterFeedback('frontend'),
         this.clearMasterFeedback('backend'),
+        this.clearMasterFeedback('website'),
       ]);
       return;
     }
@@ -827,7 +845,7 @@ export class PlanStorage {
   }
 
   /**
-   * Get combined feedback for all apps (fullstack)
+   * Get combined feedback for all apps (fullstack/all)
    */
   async getFullstackCombinedFeedback(
     milestoneId: string,
@@ -836,18 +854,20 @@ export class PlanStorage {
     unified: { averageScore: number; allConcerns: string[]; allRecommendations: string[]; combinedAnalysis: string };
     frontend: { averageScore: number; allConcerns: string[]; allRecommendations: string[]; combinedAnalysis: string };
     backend: { averageScore: number; allConcerns: string[]; allRecommendations: string[]; combinedAnalysis: string };
+    website: { averageScore: number; allConcerns: string[]; allRecommendations: string[]; combinedAnalysis: string };
     overallScore: number;
     allTaggedConcerns: TaggedItem[];
     allTaggedRecommendations: TaggedItem[];
   }> {
-    const [unified, frontend, backend] = await Promise.all([
+    const [unified, frontend, backend, website] = await Promise.all([
       this.getCombinedFeedbackForRevision(milestoneId, taskId, 'unified'),
       this.getCombinedFeedbackForRevision(milestoneId, taskId, 'frontend'),
       this.getCombinedFeedbackForRevision(milestoneId, taskId, 'backend'),
+      this.getCombinedFeedbackForRevision(milestoneId, taskId, 'website'),
     ]);
 
-    // Calculate overall score (weighted average - unified counts more)
-    const scores = [unified.averageScore, frontend.averageScore, backend.averageScore].filter(s => s > 0);
+    // Calculate overall score (weighted average)
+    const scores = [unified.averageScore, frontend.averageScore, backend.averageScore, website.averageScore].filter(s => s > 0);
     const overallScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
 
     // Create tagged concerns and recommendations
@@ -855,18 +875,21 @@ export class PlanStorage {
       ...unified.allConcerns.map(c => ({ app: 'unified' as ReviewAppTarget, content: c })),
       ...frontend.allConcerns.map(c => ({ app: 'frontend' as ReviewAppTarget, content: c })),
       ...backend.allConcerns.map(c => ({ app: 'backend' as ReviewAppTarget, content: c })),
+      ...website.allConcerns.map(c => ({ app: 'website' as ReviewAppTarget, content: c })),
     ];
 
     const allTaggedRecommendations: TaggedItem[] = [
       ...unified.allRecommendations.map(r => ({ app: 'unified' as ReviewAppTarget, content: r })),
       ...frontend.allRecommendations.map(r => ({ app: 'frontend' as ReviewAppTarget, content: r })),
       ...backend.allRecommendations.map(r => ({ app: 'backend' as ReviewAppTarget, content: r })),
+      ...website.allRecommendations.map(r => ({ app: 'website' as ReviewAppTarget, content: r })),
     ];
 
     return {
       unified,
       frontend,
       backend,
+      website,
       overallScore,
       allTaggedConcerns,
       allTaggedRecommendations,
@@ -896,7 +919,7 @@ export class PlanStorage {
   }
 
   /**
-   * Update per-app approval status (fullstack)
+   * Update per-app approval status (fullstack/all)
    */
   async updateAppApproval(
     type: 'master' | 'milestone' | 'task',
@@ -918,6 +941,9 @@ export class PlanStorage {
       } else if (appTarget === 'backend') {
         metadata.backendApproved = approved;
         metadata.backendScore = score;
+      } else if (appTarget === 'website') {
+        metadata.websiteApproved = approved;
+        metadata.websiteScore = score;
       } else {
         metadata.unifiedApproved = approved;
         metadata.unifiedScore = score;
@@ -985,9 +1011,11 @@ export class PlanStorage {
       status?: string;
       frontendScore?: number;
       backendScore?: number;
+      websiteScore?: number;
       unifiedScore?: number;
       frontendApproved?: boolean;
       backendApproved?: boolean;
+      websiteApproved?: boolean;
       unifiedApproved?: boolean;
     };
     taskPlans: Array<{
@@ -998,6 +1026,7 @@ export class PlanStorage {
       status?: string;
       frontendScore?: number;
       backendScore?: number;
+      websiteScore?: number;
       unifiedScore?: number;
     }>;
   }> {
@@ -1010,9 +1039,11 @@ export class PlanStorage {
       status?: string;
       frontendScore?: number;
       backendScore?: number;
+      websiteScore?: number;
       unifiedScore?: number;
       frontendApproved?: boolean;
       backendApproved?: boolean;
+      websiteApproved?: boolean;
       unifiedApproved?: boolean;
     } = { exists: false };
 
@@ -1026,9 +1057,11 @@ export class PlanStorage {
         status: metadata.status,
         frontendScore: metadata.frontendScore,
         backendScore: metadata.backendScore,
+        websiteScore: metadata.websiteScore,
         unifiedScore: metadata.unifiedScore,
         frontendApproved: metadata.frontendApproved,
         backendApproved: metadata.backendApproved,
+        websiteApproved: metadata.websiteApproved,
         unifiedApproved: metadata.unifiedApproved,
       };
     } catch {
@@ -1044,6 +1077,7 @@ export class PlanStorage {
       status?: string;
       frontendScore?: number;
       backendScore?: number;
+      websiteScore?: number;
       unifiedScore?: number;
     }> = [];
 
@@ -1067,6 +1101,7 @@ export class PlanStorage {
                   status: metadata.status,
                   frontendScore: metadata.frontendScore,
                   backendScore: metadata.backendScore,
+                  websiteScore: metadata.websiteScore,
                   unifiedScore: metadata.unifiedScore,
                 });
               } catch {
@@ -1097,6 +1132,7 @@ export class PlanStorage {
               status: metadata.status,
               frontendScore: metadata.frontendScore,
               backendScore: metadata.backendScore,
+              websiteScore: metadata.websiteScore,
               unifiedScore: metadata.unifiedScore,
             });
           }
@@ -1190,24 +1226,24 @@ export class PlanStorage {
    * Get all feedback file paths for the project
    */
   async getAllFeedbackPaths(): Promise<{
-    master: { unified?: string; frontend?: string; backend?: string };
+    master: { unified?: string; frontend?: string; backend?: string; website?: string };
     milestones: Array<{
       milestoneId: string;
-      paths: { unified?: string; frontend?: string; backend?: string };
+      paths: { unified?: string; frontend?: string; backend?: string; website?: string };
       tasks: Array<{
         taskId: string;
-        paths: { unified?: string; frontend?: string; backend?: string };
+        paths: { unified?: string; frontend?: string; backend?: string; website?: string };
       }>;
     }>;
   }> {
     const result: {
-      master: { unified?: string; frontend?: string; backend?: string };
+      master: { unified?: string; frontend?: string; backend?: string; website?: string };
       milestones: Array<{
         milestoneId: string;
-        paths: { unified?: string; frontend?: string; backend?: string };
+        paths: { unified?: string; frontend?: string; backend?: string; website?: string };
         tasks: Array<{
           taskId: string;
-          paths: { unified?: string; frontend?: string; backend?: string };
+          paths: { unified?: string; frontend?: string; backend?: string; website?: string };
         }>;
       }>;
     } = {
@@ -1221,6 +1257,7 @@ export class PlanStorage {
         unified: this.getMasterFeedbackPath('unified'),
         frontend: this.getMasterFeedbackPath('frontend'),
         backend: this.getMasterFeedbackPath('backend'),
+        website: this.getMasterFeedbackPath('website'),
       };
     } else {
       result.master = {
@@ -1237,12 +1274,13 @@ export class PlanStorage {
 
       for (const dir of milestoneDirs) {
         const milestoneId = dir.replace('milestone-', '');
-        const milestonePaths: { unified?: string; frontend?: string; backend?: string } = {};
+        const milestonePaths: { unified?: string; frontend?: string; backend?: string; website?: string } = {};
 
         if (this.isFullstack) {
           milestonePaths.unified = this.getFeedbackPath(milestoneId, undefined, 'unified');
           milestonePaths.frontend = this.getFeedbackPath(milestoneId, undefined, 'frontend');
           milestonePaths.backend = this.getFeedbackPath(milestoneId, undefined, 'backend');
+          milestonePaths.website = this.getFeedbackPath(milestoneId, undefined, 'website');
         } else {
           milestonePaths.unified = this.getFeedbackPath(milestoneId);
         }
@@ -1250,12 +1288,13 @@ export class PlanStorage {
         // Get task paths
         const { taskPlans } = await this.getMilestoneTrackingSummary(milestoneId);
         const tasks = taskPlans.map(tp => {
-          const taskPaths: { unified?: string; frontend?: string; backend?: string } = {};
+          const taskPaths: { unified?: string; frontend?: string; backend?: string; website?: string } = {};
 
           if (this.isFullstack) {
             taskPaths.unified = this.getFeedbackPath(milestoneId, tp.taskId, 'unified');
             taskPaths.frontend = this.getFeedbackPath(milestoneId, tp.taskId, 'frontend');
             taskPaths.backend = this.getFeedbackPath(milestoneId, tp.taskId, 'backend');
+            taskPaths.website = this.getFeedbackPath(milestoneId, tp.taskId, 'website');
           } else {
             taskPaths.unified = this.getFeedbackPath(milestoneId, tp.taskId);
           }

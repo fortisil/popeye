@@ -1,6 +1,6 @@
 /**
  * Workspace manager module
- * Handles loading, saving, and querying workspace configuration for fullstack projects
+ * Handles loading, saving, and querying workspace configuration for fullstack/all projects
  * Also provides app-specific context for AI reviews
  */
 
@@ -10,10 +10,15 @@ import type { WorkspaceConfig, WorkspaceApp } from '../types/project.js';
 import type { ReviewAppTarget } from '../types/consensus.js';
 
 /**
+ * App name type for workspace apps
+ */
+export type WorkspaceAppName = 'frontend' | 'backend' | 'website';
+
+/**
  * Context for AI review of a specific app
  */
 export interface AppReviewContext {
-  appName: 'frontend' | 'backend';
+  appName: WorkspaceAppName;
   language: 'python' | 'typescript';
   path: string;
   /** Key source files content for review */
@@ -29,11 +34,12 @@ export interface AppReviewContext {
 }
 
 /**
- * Combined review context for fullstack projects
+ * Combined review context for fullstack/all projects
  */
 export interface FullstackReviewContext {
   frontend?: AppReviewContext;
   backend?: AppReviewContext;
+  website?: AppReviewContext;
   /** Shared contracts (OpenAPI spec) */
   contracts?: string;
   /** Project-level context */
@@ -109,14 +115,14 @@ export class WorkspaceManager {
   /**
    * Get a specific app configuration
    */
-  getApp(appName: 'frontend' | 'backend'): WorkspaceApp | undefined {
+  getApp(appName: WorkspaceAppName): WorkspaceApp | undefined {
     return this.config?.apps[appName];
   }
 
   /**
    * Get the absolute path to an app
    */
-  getAppPath(appName: 'frontend' | 'backend'): string | null {
+  getAppPath(appName: WorkspaceAppName): string | null {
     const app = this.getApp(appName);
     if (!app) return null;
     return path.join(this.projectDir, app.path);
@@ -125,18 +131,19 @@ export class WorkspaceManager {
   /**
    * Get all app names
    */
-  getAppNames(): ('frontend' | 'backend')[] {
+  getAppNames(): WorkspaceAppName[] {
     if (!this.config) return [];
-    const names: ('frontend' | 'backend')[] = [];
+    const names: WorkspaceAppName[] = [];
     if (this.config.apps.frontend) names.push('frontend');
     if (this.config.apps.backend) names.push('backend');
+    if (this.config.apps.website) names.push('website');
     return names;
   }
 
   /**
    * Get test command for a specific app
    */
-  getTestCommand(appName: 'frontend' | 'backend'): string | null {
+  getTestCommand(appName: WorkspaceAppName): string | null {
     const app = this.getApp(appName);
     return app?.commands.test ?? null;
   }
@@ -172,7 +179,7 @@ export class WorkspaceManager {
   /**
    * Get lint command for a specific app
    */
-  getLintCommand(appName: 'frontend' | 'backend'): string | null {
+  getLintCommand(appName: WorkspaceAppName): string | null {
     const app = this.getApp(appName);
     return app?.commands.lint ?? null;
   }
@@ -208,7 +215,7 @@ export class WorkspaceManager {
   /**
    * Get build command for a specific app
    */
-  getBuildCommand(appName: 'frontend' | 'backend'): string | null {
+  getBuildCommand(appName: WorkspaceAppName): string | null {
     const app = this.getApp(appName);
     return app?.commands.build ?? null;
   }
@@ -244,7 +251,7 @@ export class WorkspaceManager {
   /**
    * Get dev command for a specific app
    */
-  getDevCommand(appName: 'frontend' | 'backend'): string | null {
+  getDevCommand(appName: WorkspaceAppName): string | null {
     const app = this.getApp(appName);
     return app?.commands.dev ?? null;
   }
@@ -288,7 +295,7 @@ export class WorkspaceManager {
   /**
    * Get context roots for an app (files to include in AI context)
    */
-  getContextRoots(appName: 'frontend' | 'backend'): string[] {
+  getContextRoots(appName: WorkspaceAppName): string[] {
     const app = this.getApp(appName);
     if (!app || !app.contextRoots) return [];
 
@@ -315,7 +322,7 @@ export class WorkspaceManager {
   /**
    * Get app language
    */
-  getAppLanguage(appName: 'frontend' | 'backend'): 'python' | 'typescript' | null {
+  getAppLanguage(appName: WorkspaceAppName): 'python' | 'typescript' | null {
     const app = this.getApp(appName);
     return app?.language ?? null;
   }
@@ -323,7 +330,7 @@ export class WorkspaceManager {
   /**
    * Determine which app should handle a file based on path
    */
-  getAppForFile(filePath: string): 'frontend' | 'backend' | null {
+  getAppForFile(filePath: string): WorkspaceAppName | null {
     const relativePath = path.relative(this.projectDir, filePath);
 
     for (const appName of this.getAppNames()) {
@@ -341,7 +348,7 @@ export class WorkspaceManager {
    * Reads key files from contextRoots to provide to AI reviewers
    */
   async getAppReviewContext(
-    appName: 'frontend' | 'backend',
+    appName: WorkspaceAppName,
     options: {
       maxFiles?: number;
       maxFileSize?: number;
@@ -406,7 +413,8 @@ export class WorkspaceManager {
 
     // Read test files
     if (includeTests) {
-      const testDir = path.join(appPath, appName === 'frontend' ? 'src' : 'tests');
+      // Frontend and website use 'src' for tests, backend uses 'tests'
+      const testDir = path.join(appPath, (appName === 'frontend' || appName === 'website') ? 'src' : 'tests');
       try {
         const testFiles = await this.findTestFiles(testDir, app.language);
         context.testFiles = testFiles.slice(0, 5); // Limit test files
@@ -462,6 +470,15 @@ export class WorkspaceManager {
     });
     if (backend) {
       context.backend = backend;
+    }
+
+    // Get website context (for 'all' projects)
+    const website = await this.getAppReviewContext('website', {
+      maxFiles: maxFilesPerApp,
+      includeTests,
+    });
+    if (website) {
+      context.website = website;
     }
 
     // Get shared contracts
@@ -527,7 +544,7 @@ export class WorkspaceManager {
   }
 
   /**
-   * Format fullstack context for review prompt
+   * Format fullstack/all context for review prompt
    */
   formatFullstackContextForReview(context: FullstackReviewContext): string {
     const lines: string[] = [];
@@ -554,21 +571,26 @@ export class WorkspaceManager {
       lines.push(this.formatContextForReview(context.backend));
     }
 
+    if (context.website) {
+      lines.push(this.formatContextForReview(context.website));
+    }
+
     return lines.join('\n');
   }
 
   /**
    * Determine review app target based on plan content
-   * Analyzes plan text to determine if it's frontend, backend, or unified
+   * Analyzes plan text to determine if it's frontend, backend, website, or unified
    */
   categorizeByPlanContent(planContent: string): ReviewAppTarget {
     const lowerContent = planContent.toLowerCase();
 
-    // Frontend indicators
+    // Frontend indicators (app frontend - React/Vue components)
     const frontendKeywords = [
       'react', 'component', 'jsx', 'tsx', 'css', 'tailwind', 'ui',
-      'button', 'form', 'page', 'layout', 'style', 'vite', 'frontend',
+      'button', 'form', 'layout', 'style', 'vite', 'frontend',
       'client', 'browser', 'dom', 'render', 'hook', 'state',
+      'apps/frontend',
     ];
 
     // Backend indicators
@@ -576,12 +598,24 @@ export class WorkspaceManager {
       'api', 'endpoint', 'route', 'database', 'model', 'schema',
       'fastapi', 'flask', 'django', 'express', 'server', 'backend',
       'authentication', 'middleware', 'orm', 'sql', 'query', 'crud',
+      'apps/backend',
+    ];
+
+    // Website indicators (marketing/landing pages, SEO)
+    const websiteKeywords = [
+      'website', 'landing', 'marketing', 'seo', 'meta', 'sitemap',
+      'static', 'astro', 'next', 'gatsby', 'blog', 'content',
+      'apps/website', '[web]', 'web page', 'homepage',
     ];
 
     const frontendScore = frontendKeywords.filter(kw => lowerContent.includes(kw)).length;
     const backendScore = backendKeywords.filter(kw => lowerContent.includes(kw)).length;
+    const websiteScore = websiteKeywords.filter(kw => lowerContent.includes(kw)).length;
 
-    // Threshold for classification
+    // Threshold for classification - check website first as it's most specific
+    if (websiteScore > Math.max(frontendScore, backendScore) && websiteScore >= 2) {
+      return 'website';
+    }
     if (frontendScore > backendScore * 2 && frontendScore >= 3) {
       return 'frontend';
     }
@@ -682,9 +716,9 @@ export class WorkspaceManager {
    * Get feedback document paths for workspace
    */
   getFeedbackPaths(): {
-    master: { unified: string; frontend: string; backend: string };
-    getMilestonePaths: (milestoneId: string) => { unified: string; frontend: string; backend: string };
-    getTaskPaths: (milestoneId: string, taskId: string) => { unified: string; frontend: string; backend: string };
+    master: { unified: string; frontend: string; backend: string; website: string };
+    getMilestonePaths: (milestoneId: string) => { unified: string; frontend: string; backend: string; website: string };
+    getTaskPaths: (milestoneId: string, taskId: string) => { unified: string; frontend: string; backend: string; website: string };
   } {
     const plansDir = path.join(this.projectDir, 'docs', 'plans');
 
@@ -693,16 +727,19 @@ export class WorkspaceManager {
         unified: path.join(plansDir, 'master', 'unified', 'feedback.md'),
         frontend: path.join(plansDir, 'master', 'frontend', 'feedback.md'),
         backend: path.join(plansDir, 'master', 'backend', 'feedback.md'),
+        website: path.join(plansDir, 'master', 'website', 'feedback.md'),
       },
       getMilestonePaths: (milestoneId: string) => ({
         unified: path.join(plansDir, `milestone-${milestoneId}`, 'unified', 'feedback.md'),
         frontend: path.join(plansDir, `milestone-${milestoneId}`, 'frontend', 'feedback.md'),
         backend: path.join(plansDir, `milestone-${milestoneId}`, 'backend', 'feedback.md'),
+        website: path.join(plansDir, `milestone-${milestoneId}`, 'website', 'feedback.md'),
       }),
       getTaskPaths: (milestoneId: string, taskId: string) => ({
         unified: path.join(plansDir, `milestone-${milestoneId}`, 'tasks', `task-${taskId}`, 'unified', 'feedback.md'),
         frontend: path.join(plansDir, `milestone-${milestoneId}`, 'tasks', `task-${taskId}`, 'frontend', 'feedback.md'),
         backend: path.join(plansDir, `milestone-${milestoneId}`, 'tasks', `task-${taskId}`, 'backend', 'feedback.md'),
+        website: path.join(plansDir, `milestone-${milestoneId}`, 'tasks', `task-${taskId}`, 'website', 'feedback.md'),
       }),
     };
   }
@@ -745,12 +782,12 @@ export async function isWorkspaceProject(projectDir: string): Promise<boolean> {
  * Get app context for AI code generation
  *
  * @param projectDir - Project directory
- * @param appName - App name
+ * @param appName - App name (frontend, backend, or website)
  * @returns Object with app info and context files
  */
 export async function getAppContext(
   projectDir: string,
-  appName: 'frontend' | 'backend'
+  appName: WorkspaceAppName
 ): Promise<{
   app: WorkspaceApp | undefined;
   language: 'python' | 'typescript' | null;
@@ -818,12 +855,12 @@ export async function getBuildCommands(projectDir: string): Promise<{
  * Get app-specific review context
  *
  * @param projectDir - Project directory
- * @param appName - App name (frontend or backend)
+ * @param appName - App name (frontend, backend, or website)
  * @returns Review context with source files and metadata
  */
 export async function getAppReviewContext(
   projectDir: string,
-  appName: 'frontend' | 'backend'
+  appName: WorkspaceAppName
 ): Promise<AppReviewContext | null> {
   const manager = new WorkspaceManager(projectDir);
   const config = await manager.load();
@@ -899,9 +936,9 @@ export async function categorizePlanContent(
  * @returns Object with feedback path getters
  */
 export async function getWorkspaceFeedbackPaths(projectDir: string): Promise<{
-  master: { unified: string; frontend: string; backend: string };
-  getMilestonePaths: (milestoneId: string) => { unified: string; frontend: string; backend: string };
-  getTaskPaths: (milestoneId: string, taskId: string) => { unified: string; frontend: string; backend: string };
+  master: { unified: string; frontend: string; backend: string; website: string };
+  getMilestonePaths: (milestoneId: string) => { unified: string; frontend: string; backend: string; website: string };
+  getTaskPaths: (milestoneId: string, taskId: string) => { unified: string; frontend: string; backend: string; website: string };
 } | null> {
   const manager = new WorkspaceManager(projectDir);
   const config = await manager.load();

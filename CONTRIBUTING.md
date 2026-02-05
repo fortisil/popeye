@@ -188,7 +188,17 @@ src/
 ├── state/         # State management
 ├── types/         # TypeScript type definitions
 └── workflow/      # Core workflow logic
+    ├── plan-storage.ts      # Consensus docs per-app storage
+    └── workspace-manager.ts # Multi-app workspace management
 ```
+
+### App Target Types
+
+For fullstack and ALL projects, feedback is tracked per app target:
+- `frontend` - React/Vue application
+- `backend` - FastAPI/Express API
+- `website` - Marketing/landing pages (ALL projects)
+- `unified` - Cross-app integration concerns
 
 ### Formatting
 

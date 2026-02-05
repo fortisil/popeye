@@ -36,6 +36,16 @@ import {
 } from './templates/fullstack.js';
 
 /**
+ * Options for fullstack project generation
+ */
+export interface FullstackGeneratorOptions {
+  skipBackend?: boolean;
+  skipFrontend?: boolean;
+  strictMode?: boolean;
+  includeExamples?: boolean;
+}
+
+/**
  * Create a directory if it doesn't exist
  */
 async function ensureDir(dirPath: string): Promise<void> {

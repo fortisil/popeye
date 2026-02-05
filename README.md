@@ -312,6 +312,9 @@ popeye create "A React component library for data visualization" --language type
 
 # Create a Fullstack project (React frontend + FastAPI backend)
 popeye create "A task management app with user authentication" --language fullstack
+
+# Create an ALL project (React app + FastAPI backend + Marketing website)
+popeye create "A SaaS product with landing page and dashboard" --language all
 ```
 
 ### 3. Monitor Progress
@@ -408,6 +411,26 @@ Example fullstack task in a plan:
 **Dependencies**: Task 1.1, Task 1.2
 ```
 
+### ALL Project Support (Fullstack + Website)
+
+For comprehensive projects that need both an application and a marketing/landing website, Popeye supports the `all` project type which includes:
+
+- **Frontend App**: React application (same as fullstack)
+- **Backend API**: FastAPI backend (same as fullstack)
+- **Website**: Static marketing/landing site (Astro, Next.js static, or similar)
+
+Tasks can be tagged with:
+- `[FE]` - Frontend application work
+- `[BE]` - Backend API work
+- `[WEB]` - Website/marketing pages work
+- `[INT]` - Integration work across multiple apps
+
+The consensus system tracks approval separately for each app target:
+- `frontend` - React/Vue application components
+- `backend` - API endpoints and database logic
+- `website` - Marketing pages, landing pages, SEO content
+- `unified` - Cross-app integration and shared concerns
+
 ### Reliability Features
 
 - **Rate Limit Handling**: Automatically waits and retries when API rate limits are hit
@@ -460,6 +483,33 @@ Example fullstack task in a plan:
   - Checks component library setup
   - Validates theme configuration
 
+### Consensus Documentation Storage
+
+For fullstack and ALL projects, Popeye maintains detailed consensus documentation with per-app feedback tracking:
+
+- **Per-App Feedback**: Feedback is stored separately for each app target:
+  - `unified/` - Cross-app and integration concerns
+  - `frontend/` - React/Vue application feedback
+  - `backend/` - API and database feedback
+  - `website/` - Marketing/landing page feedback (ALL projects only)
+
+- **Hierarchical Storage**: Feedback is organized by plan level:
+  - `docs/plans/master/` - Master plan feedback
+  - `docs/plans/milestone-N/` - Milestone-level feedback
+  - `docs/plans/milestone-N/tasks/task-N/` - Task-level feedback
+
+- **Tracked Metadata**: Each plan level includes `metadata.json` with:
+  - Per-app scores (frontendScore, backendScore, websiteScore, unifiedScore)
+  - Per-app approval status
+  - Correction history and iteration counts
+  - Timestamps for auditing
+
+- **Human-Readable Feedback**: Both JSON and Markdown formats:
+  - `feedback.json` - Structured data for programmatic access
+  - `feedback.md` - Human-readable reviewer feedback
+
+This system ensures full traceability of all AI decisions and enables debugging of consensus failures.
+
 ## Commands
 
 ### `popeye create <idea>`
@@ -477,7 +527,7 @@ popeye create "A CLI tool for converting markdown to PDF" \
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-n, --name <name>` | Project name | Derived from idea |
-| `-l, --language <lang>` | `python` or `typescript` | `python` |
+| `-l, --language <lang>` | `python`, `typescript`, `fullstack`, or `all` | `python` |
 | `-d, --directory <dir>` | Output directory | Current directory |
 | `-m, --model <model>` | OpenAI model for consensus | `gpt-4o` |
 
@@ -567,6 +617,7 @@ popeye
 - `/lang py` or `/lang python` - Python projects
 - `/lang ts` or `/lang typescript` - TypeScript projects
 - `/lang fs` or `/lang fullstack` - Fullstack projects (React + FastAPI)
+- `/lang all` or `/lang web` - ALL projects (React + FastAPI + Website)
 
 **Status Bar Indicators:**
 The input box shows current configuration:
@@ -794,7 +845,38 @@ my-project/
 │
 ├── docs/
 │   ├── PLAN.md                # Development plan with [FE], [BE], [INT] tags
-│   └── WORKFLOW_LOG.md
+│   ├── WORKFLOW_LOG.md
+│   └── plans/                 # Consensus documentation (fullstack/all projects)
+│       ├── master/
+│       │   ├── plan.md
+│       │   ├── metadata.json
+│       │   ├── unified/       # Cross-app feedback
+│       │   │   ├── feedback.json
+│       │   │   └── feedback.md
+│       │   ├── frontend/      # Frontend-specific feedback
+│       │   │   ├── feedback.json
+│       │   │   └── feedback.md
+│       │   ├── backend/       # Backend-specific feedback
+│       │   │   ├── feedback.json
+│       │   │   └── feedback.md
+│       │   └── website/       # Website-specific feedback (ALL projects)
+│       │       ├── feedback.json
+│       │       └── feedback.md
+│       └── milestone-N/
+│           ├── plan.md
+│           ├── metadata.json
+│           ├── unified/
+│           ├── frontend/
+│           ├── backend/
+│           ├── website/
+│           └── tasks/
+│               └── task-N/
+│                   ├── plan.md
+│                   ├── metadata.json
+│                   ├── unified/
+│                   ├── frontend/
+│                   ├── backend/
+│                   └── website/
 ├── README.md
 ├── .gitignore
 ├── .env.example
@@ -802,7 +884,32 @@ my-project/
 ├── popeye.md                  # Project configuration
 └── .popeye/
     ├── state.json
+    ├── workspace.json         # Workspace configuration for multi-app projects
     └── ui-spec.json
+```
+
+### ALL Projects (Fullstack + Website)
+
+For projects using the `all` language option, an additional `website/` app is included:
+
+```
+my-project/
+├── apps/
+│   ├── frontend/              # React application
+│   ├── backend/               # FastAPI backend
+│   └── website/               # Marketing/landing site
+│       ├── src/
+│       │   ├── pages/
+│       │   ├── components/
+│       │   └── content/
+│       ├── public/
+│       ├── package.json
+│       └── astro.config.mjs   # (or next.config.js, etc.)
+│
+├── docs/
+│   └── plans/                 # Includes website/ directories
+│       └── ...
+└── ...
 ```
 
 ## UI Design System
@@ -974,6 +1081,8 @@ src/
 │   ├── task-workflow.ts
 │   ├── test-runner.ts    # Test execution
 │   ├── workflow-logger.ts # Persistent logging
+│   ├── plan-storage.ts   # Consensus docs storage (per-app feedback)
+│   ├── workspace-manager.ts # Multi-app workspace management
 │   ├── ui-designer.ts    # AI-powered UI design generation
 │   ├── ui-setup.ts       # Tailwind/shadcn setup automation
 │   ├── ui-verification.ts # UI setup verification

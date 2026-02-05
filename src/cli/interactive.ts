@@ -302,7 +302,12 @@ function drawInputBoxTop(state: SessionState): void {
 
   // Hints line (above the box)
   const hints = [
-    theme.dim('/lang ') + theme.primary('py') + theme.dim('|') + theme.primary('ts') + theme.dim('|') + theme.primary('fs'),
+    theme.dim('/lang ') +
+      theme.primary('be') + theme.dim('|') +
+      theme.primary('fe') + theme.dim('|') +
+      theme.primary('fs') + theme.dim('|') +
+      theme.primary('web') + theme.dim('|') +
+      theme.primary('all'),
     theme.dim('/config'),
     theme.dim('/help'),
     theme.dim('/exit'),
@@ -310,7 +315,14 @@ function drawInputBoxTop(state: SessionState): void {
   console.log('  ' + hints.join('   '));
 
   // Status items for the top line
-  const langStatus = state.language === 'fullstack' ? 'fs' : state.language;
+  const langShortcuts: Record<OutputLanguage, string> = {
+    python: 'be',
+    typescript: 'fe',
+    fullstack: 'fs',
+    website: 'web',
+    all: 'all',
+  };
+  const langStatus = langShortcuts[state.language] || state.language;
   const reviewerStatus = state.reviewer === 'openai' ? 'O' : state.reviewer === 'grok' ? 'X' : 'G';
   const arbitratorStatus = state.enableArbitration
     ? (state.arbitrator === 'openai' ? 'O' : state.arbitrator === 'grok' ? 'X' : 'G')
@@ -1046,12 +1058,24 @@ async function handleConfig(state: SessionState, args: string[] = []): Promise<v
         if (args.length > 1) {
           // Map shortcuts to full language names
           const langAliases: Record<string, OutputLanguage> = {
+            // Backend aliases
             'py': 'python',
             'python': 'python',
+            'be': 'python',
+            'backend': 'python',
+            // Frontend aliases
             'ts': 'typescript',
             'typescript': 'typescript',
+            'fe': 'typescript',
+            'frontend': 'typescript',
+            // Fullstack aliases
             'fs': 'fullstack',
             'fullstack': 'fullstack',
+            // Website aliases
+            'web': 'website',
+            'website': 'website',
+            // All aliases
+            'all': 'all',
           };
           const input = args[1].toLowerCase();
           const lang = langAliases[input];
@@ -1059,7 +1083,7 @@ async function handleConfig(state: SessionState, args: string[] = []): Promise<v
             state.language = lang;
             printSuccess(`Language set to ${lang}`);
           } else {
-            printError('Invalid language. Use: py, ts, fs (or python, typescript, fullstack)');
+            printError('Invalid language. Use: be, fe, fs, web, all (or python, typescript, fullstack, website, all)');
           }
         } else {
           printKeyValue('Language', state.language);
@@ -1098,7 +1122,7 @@ async function handleConfig(state: SessionState, args: string[] = []): Promise<v
   console.log(theme.secondary('  Change settings:'));
   console.log(theme.dim('    /config reviewer <openai|gemini|grok>'));
   console.log(theme.dim('    /config arbitrator <openai|gemini|grok|off>'));
-  console.log(theme.dim('    /config language <python|typescript|fullstack>'));
+  console.log(theme.dim('    /config language <be|fe|fs|web|all>'));
   console.log();
 }
 
@@ -1109,25 +1133,42 @@ function handleLanguage(args: string[], state: SessionState): void {
   if (args.length === 0) {
     console.log();
     printKeyValue('Current language', state.language);
-    printInfo('Use /language <py|ts|fs> or <python|typescript|fullstack> to change');
+    printInfo('Use /language <be|fe|fs|web|all> to change');
+    console.log(theme.dim('    be/backend   - Python (FastAPI)'));
+    console.log(theme.dim('    fe/frontend  - TypeScript (React/Vite)'));
+    console.log(theme.dim('    fs/fullstack - FE + BE monorepo'));
+    console.log(theme.dim('    web/website  - Next.js marketing site'));
+    console.log(theme.dim('    all          - FE + BE + Website'));
     return;
   }
 
   // Map shortcuts to full language names
   const langAliases: Record<string, OutputLanguage> = {
+    // Backend aliases
     'py': 'python',
     'python': 'python',
+    'be': 'python',
+    'backend': 'python',
+    // Frontend aliases
     'ts': 'typescript',
     'typescript': 'typescript',
+    'fe': 'typescript',
+    'frontend': 'typescript',
+    // Fullstack aliases
     'fs': 'fullstack',
     'fullstack': 'fullstack',
+    // Website aliases
+    'web': 'website',
+    'website': 'website',
+    // All aliases
+    'all': 'all',
   };
 
   const input = args[0].toLowerCase();
   const lang = langAliases[input];
 
   if (!lang) {
-    printError('Invalid language. Use: py, ts, fs (or python, typescript, fullstack)');
+    printError('Invalid language. Use: be, fe, fs, web, all');
     return;
   }
 

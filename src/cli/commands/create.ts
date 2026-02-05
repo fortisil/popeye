@@ -35,7 +35,7 @@ export function createCreateCommand(): Command {
     .option('-n, --name <name>', 'Project name')
     .option(
       '-l, --language <lang>',
-      'Output language (python, typescript, fullstack)',
+      'Output language (python/be, typescript/fe, fullstack/fs, website/web, all)',
       'python'
     )
     .option(
@@ -64,10 +64,30 @@ export function createCreateCommand(): Command {
     )
     .action(async (idea: string, options) => {
       try {
-        // Validate inputs
-        const language = options.language as OutputLanguage;
-        if (!['python', 'typescript', 'fullstack'].includes(language)) {
-          printError(`Invalid language: ${language}. Use 'python', 'typescript', or 'fullstack'.`);
+        // Map language aliases and validate
+        const langAliases: Record<string, OutputLanguage> = {
+          // Backend aliases
+          'py': 'python',
+          'python': 'python',
+          'be': 'python',
+          'backend': 'python',
+          // Frontend aliases
+          'ts': 'typescript',
+          'typescript': 'typescript',
+          'fe': 'typescript',
+          'frontend': 'typescript',
+          // Fullstack aliases
+          'fs': 'fullstack',
+          'fullstack': 'fullstack',
+          // Website aliases
+          'web': 'website',
+          'website': 'website',
+          // All aliases
+          'all': 'all',
+        };
+        const language = langAliases[options.language.toLowerCase()];
+        if (!language) {
+          printError(`Invalid language: ${options.language}. Use 'be', 'fe', 'fs', 'web', or 'all'.`);
           process.exit(1);
         }
 

@@ -5,7 +5,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { ProjectSpec } from '../types/project.js';
+import type { ProjectSpec, OutputLanguage } from '../types/project.js';
 import type { ProjectState, Milestone, Task } from '../types/workflow.js';
 import type { ConsensusConfig } from '../types/consensus.js';
 import { expandIdea as openaiExpandIdea } from '../adapters/openai.js';
@@ -52,7 +52,7 @@ export interface PlanModeResult {
  */
 export async function expandIdea(
   idea: string,
-  language: 'python' | 'typescript' | 'fullstack',
+  language: OutputLanguage,
   onProgress?: (message: string) => void
 ): Promise<string> {
   onProgress?.('Expanding idea into specification...');
@@ -75,7 +75,7 @@ export async function expandIdea(
 export async function createPlan(
   specification: string,
   context: string = '',
-  language: 'python' | 'typescript' | 'fullstack' = 'python',
+  language: OutputLanguage = 'python',
   onProgress?: (message: string) => void
 ): Promise<string> {
   onProgress?.('Creating development plan...');

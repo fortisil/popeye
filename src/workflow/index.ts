@@ -41,6 +41,14 @@ export * from './ui-designer.js';
 export * from './ui-verification.js';
 export * from './project-verification.js';
 export * from './auto-fix.js';
+// Note: plan-parser.js exports are accessible but have naming conflicts with plan-mode.js
+// Import directly from './plan-parser.js' if you need the extended TaskAppTag type (includes 'WEB')
+export * from './separation-guard.js';
+export * from './seo-tests.js';
+export * from './task-workflow.js';
+export * from './milestone-workflow.js';
+export * from './plan-storage.js';
+export * from './workspace-manager.js';
 
 /**
  * Workflow options

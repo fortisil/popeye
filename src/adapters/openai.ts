@@ -4,7 +4,7 @@
  */
 
 import OpenAI from 'openai';
-import type { ConsensusResult, ConsensusConfig, OpenAIModel } from '../types/index.js';
+import type { ConsensusResult, ConsensusConfig, OpenAIModel, OutputLanguage } from '../types/index.js';
 import { getOpenAIToken } from '../auth/index.js';
 import { DEFAULT_CONSENSUS_CONFIG } from '../types/consensus.js';
 
@@ -256,7 +256,7 @@ export async function listAvailableModels(): Promise<string[]> {
  */
 export async function expandIdea(
   idea: string,
-  language: 'python' | 'typescript' | 'fullstack'
+  language: OutputLanguage
 ): Promise<string> {
   const client = await createClient();
 
