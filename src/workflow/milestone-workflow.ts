@@ -37,6 +37,8 @@ export interface MilestoneWorkflowResult {
   completionConsensus?: ConsensusProcessResult;
   taskResults: TaskWorkflowResult[];
   error?: string;
+  /** True if workflow paused due to rate limiting (not a failure) */
+  rateLimitPaused?: boolean;
 }
 
 /**
@@ -463,6 +465,26 @@ Tasks: ${milestone.tasks.length}
       onTaskComplete?.(task, taskResult.success);
 
       if (!taskResult.success) {
+        // Check if this is a rate limit pause (not a real failure)
+        if (taskResult.rateLimitPaused) {
+          onProgress?.('milestone-tasks', `Task paused (rate limit): ${task.name}`);
+
+          // Update milestone status to paused
+          state = await updateMilestoneInState(projectDir, milestone.id, {
+            status: 'paused',
+          });
+
+          return {
+            success: false,
+            milestone: { ...milestone, status: 'paused' },
+            planConsensus,
+            taskResults,
+            rateLimitPaused: true,
+            error: `Task "${task.name}" paused due to rate limit. Run /resume to continue.`,
+          };
+        }
+
+        // Actual failure
         onProgress?.('milestone-tasks', `Task failed: ${task.name}`);
 
         // Update milestone status

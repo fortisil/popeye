@@ -11,6 +11,11 @@ import { query, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 /**
  * Options for executing a prompt through Claude
  */
+/**
+ * User's choice when rate limit wait time exceeds maximum
+ */
+export type RateLimitChoice = 'wait' | 'pause';
+
 export interface ClaudeExecuteOptions {
   cwd?: string;
   allowedTools?: string[];
@@ -28,6 +33,12 @@ export interface ClaudeExecuteOptions {
     baseWaitMs?: number;
     maxWaitMs?: number;
   } | false;
+  /**
+   * Callback when rate limit wait time exceeds maximum.
+   * Returns 'wait' to wait for the full duration, or 'pause' to exit gracefully.
+   * If not provided, defaults to 'pause' behavior.
+   */
+  onRateLimitChoice?: (waitTimeMs: number, resetMessage: string) => Promise<RateLimitChoice>;
 }
 
 /**
@@ -309,6 +320,19 @@ export interface ClaudeExecuteResult {
   response: string;
   toolCalls: ToolCallRecord[];
   error?: string;
+  /**
+   * True if the operation was paused due to rate limiting (not a failure).
+   * When true, the user can resume later without losing progress.
+   */
+  rateLimitPaused?: boolean;
+  /**
+   * Information about the rate limit if applicable
+   */
+  rateLimitInfo?: {
+    resetTime?: Date;
+    waitTimeMs?: number;
+    message?: string;
+  };
 }
 
 /**
@@ -588,7 +612,7 @@ export async function executePrompt(
   prompt: string,
   options: ClaudeExecuteOptions = {}
 ): Promise<ClaudeExecuteResult> {
-  const { onProgress, rateLimitConfig: userRateLimitConfig } = options;
+  const { onProgress, rateLimitConfig: userRateLimitConfig, onRateLimitChoice } = options;
 
   // If rate limit handling is disabled, run once without retry
   if (userRateLimitConfig === false) {
@@ -654,16 +678,50 @@ export async function executePrompt(
     // Ensure minimum wait time
     waitMs = Math.max(waitMs, 30_000);
 
-    // IMPORTANT: Cap wait time to maxWaitMs - don't wait hours for rate limits
+    // Check if wait time exceeds maximum
     if (waitMs > rateLimitConfig.maxWaitMs) {
-      onProgress?.(`Rate limit reset time is too far in the future (${formatWaitTime(waitMs)})`);
-      onProgress?.(`Maximum wait time is ${formatWaitTime(rateLimitConfig.maxWaitMs)}. Please try again later.`);
-      return {
-        success: false,
-        response: result.response,
-        toolCalls: result.toolCalls,
-        error: `Rate limit exceeded. Reset time is ${formatWaitTime(waitMs)} away - too long to wait. Please try again later.`,
-      };
+      const resetMessage = result.rateLimitInfo.message || `Reset in ${formatWaitTime(waitMs)}`;
+
+      // If callback provided, ask user what to do
+      if (onRateLimitChoice) {
+        onProgress?.(`Rate limit: wait time is ${formatWaitTime(waitMs)} (exceeds ${formatWaitTime(rateLimitConfig.maxWaitMs)} max)`);
+
+        const choice = await onRateLimitChoice(waitMs, resetMessage);
+
+        if (choice === 'wait') {
+          // User chose to wait - continue with the full wait time
+          onProgress?.(`Waiting ${formatWaitTime(waitMs)} as requested...`);
+        } else {
+          // User chose to pause - return graceful pause (not failure)
+          onProgress?.(`Pausing due to rate limit. You can resume later with /resume`);
+          return {
+            success: false,
+            response: result.response,
+            toolCalls: result.toolCalls,
+            rateLimitPaused: true,
+            rateLimitInfo: {
+              resetTime: result.rateLimitInfo.resetTime,
+              waitTimeMs: waitMs,
+              message: resetMessage,
+            },
+          };
+        }
+      } else {
+        // No callback - return graceful pause by default
+        onProgress?.(`Rate limit: wait time is ${formatWaitTime(waitMs)} (exceeds ${formatWaitTime(rateLimitConfig.maxWaitMs)} max)`);
+        onProgress?.(`Pausing due to rate limit. You can resume later with /resume`);
+        return {
+          success: false,
+          response: result.response,
+          toolCalls: result.toolCalls,
+          rateLimitPaused: true,
+          rateLimitInfo: {
+            resetTime: result.rateLimitInfo.resetTime,
+            waitTimeMs: waitMs,
+            message: resetMessage,
+          },
+        };
+      }
     }
 
     onProgress?.(`Rate limit hit (attempt ${attempt}/${rateLimitConfig.maxRetries}). ${result.rateLimitInfo.message || ''}`);

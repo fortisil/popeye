@@ -35,6 +35,8 @@ export interface TaskWorkflowResult {
   consensusResult?: ConsensusProcessResult;
   testResult?: TestResult;
   error?: string;
+  /** True if workflow paused due to rate limiting (not a failure) */
+  rateLimitPaused?: boolean;
 }
 
 /**
@@ -408,6 +410,29 @@ Task: ${task.name}
       );
 
       if (!implementResult.success) {
+        // Check if this is a rate limit pause (not a real failure)
+        if (implementResult.rateLimitPaused) {
+          const resetInfo = implementResult.rateLimitInfo;
+          const pauseMessage = resetInfo?.message || 'Rate limit reached';
+
+          state = await updateTaskInState(projectDir, task.id, {
+            status: 'paused',
+            error: `Rate limit: ${pauseMessage}. Run /resume to continue.`,
+          });
+
+          onProgress?.('task-implement', `Task paused due to rate limit: ${pauseMessage}`);
+          onProgress?.('task-implement', 'Your progress is saved. Run /resume to continue after the rate limit resets.');
+
+          return {
+            success: false,
+            task: { ...task, status: 'paused' },
+            consensusResult,
+            rateLimitPaused: true,
+            error: `Rate limit: ${pauseMessage}`,
+          };
+        }
+
+        // Actual failure
         state = await updateTaskInState(projectDir, task.id, {
           status: 'failed',
           error: implementResult.error,

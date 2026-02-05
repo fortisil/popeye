@@ -1596,6 +1596,15 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
 
       printSuccess('Workflow completed!');
       console.log(`    ${theme.dim('Location:')} ${state.projectDir}`);
+    } else if (result.rateLimitPaused) {
+      // Rate limit pause - show friendly message, not an error
+      console.log();
+      console.log(`  ${theme.warning('Rate Limit Reached')}`);
+      console.log(`  ${theme.dim(result.error || 'API rate limit exceeded')}`);
+      console.log();
+      console.log(`  ${theme.info('Your progress has been saved.')}`);
+      console.log(`  ${theme.dim('Run')} ${theme.highlight('/resume')} ${theme.dim('after the rate limit resets to continue.')}`);
+      console.log();
     } else {
       printError(result.error || 'Workflow failed');
       printInfo('You can run /resume again with additional guidance');
@@ -2046,6 +2055,16 @@ async function handleIdea(idea: string, state: SessionState): Promise<void> {
     printSuccess('Project created successfully!');
     console.log(`    ${theme.dim('Location:')} ${projectDir}`);
     state.projectDir = projectDir;
+  } else if (workflowResult.rateLimitPaused) {
+    // Rate limit pause - show friendly message, not an error
+    console.log();
+    console.log(`  ${theme.warning('Rate Limit Reached')}`);
+    console.log(`  ${theme.dim(workflowResult.error || 'API rate limit exceeded')}`);
+    console.log();
+    console.log(`  ${theme.info('Your progress has been saved.')}`);
+    console.log(`  ${theme.dim('Run')} ${theme.highlight('/resume')} ${theme.dim('after the rate limit resets to continue.')}`);
+    console.log();
+    state.projectDir = projectDir;
   } else {
     printError(workflowResult.error || 'Workflow failed');
   }
@@ -2146,6 +2165,16 @@ async function handleNewProject(idea: string, state: SessionState): Promise<void
 
     printSuccess('Project created successfully!');
     console.log(`    ${theme.dim('Location:')} ${projectDir}`);
+    state.projectDir = projectDir;
+  } else if (workflowResult.rateLimitPaused) {
+    // Rate limit pause - show friendly message, not an error
+    console.log();
+    console.log(`  ${theme.warning('Rate Limit Reached')}`);
+    console.log(`  ${theme.dim(workflowResult.error || 'API rate limit exceeded')}`);
+    console.log();
+    console.log(`  ${theme.info('Your progress has been saved.')}`);
+    console.log(`  ${theme.dim('Run')} ${theme.highlight('/resume')} ${theme.dim('after the rate limit resets to continue.')}`);
+    console.log();
     state.projectDir = projectDir;
   } else {
     printError(workflowResult.error || 'Workflow failed');

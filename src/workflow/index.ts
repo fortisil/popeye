@@ -61,6 +61,8 @@ export interface WorkflowResult {
   planResult?: PlanModeResult;
   executionResult?: ExecutionModeResult;
   error?: string;
+  /** True if workflow paused due to rate limiting (not a failure) */
+  rateLimitPaused?: boolean;
 }
 
 /**
@@ -119,6 +121,12 @@ export async function runWorkflow(
         completedTasks: executionResult.completedTasks,
         failedTasks: executionResult.failedTasks,
       });
+    } else if (executionResult.rateLimitPaused) {
+      // Rate limit pause is not a failure - log info instead of error
+      await logger.info('completion', 'workflow_paused', 'Workflow paused due to rate limit', {
+        completedTasks: executionResult.completedTasks,
+        error: executionResult.error,
+      });
     } else {
       await logger.stageFailed('completion', 'Workflow failed in Execution Mode', executionResult.error || 'Execution failed');
     }
@@ -128,6 +136,7 @@ export async function runWorkflow(
       state: executionResult.state,
       planResult,
       executionResult,
+      rateLimitPaused: executionResult.rateLimitPaused,
       error: executionResult.error,
     };
   } catch (error) {
@@ -220,6 +229,7 @@ export async function resumeWorkflow(
           state: executionResult.state,
           planResult,
           executionResult,
+          rateLimitPaused: executionResult.rateLimitPaused,
           error: executionResult.error,
         };
       }
@@ -237,6 +247,7 @@ export async function resumeWorkflow(
           success: executionResult.success,
           state: executionResult.state,
           executionResult,
+          rateLimitPaused: executionResult.rateLimitPaused,
           error: executionResult.error,
         };
       }
@@ -281,6 +292,7 @@ export async function resumeWorkflow(
           success: executionResult.success,
           state: executionResult.state,
           executionResult,
+          rateLimitPaused: executionResult.rateLimitPaused,
           error: executionResult.error,
         };
       }

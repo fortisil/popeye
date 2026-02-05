@@ -63,6 +63,8 @@ export interface ExecutionModeResult {
   completedTasks: number;
   failedTasks: number;
   error?: string;
+  /** True if execution paused due to rate limiting (not a failure) */
+  rateLimitPaused?: boolean;
 }
 
 /**
@@ -608,6 +610,36 @@ export async function runExecutionMode(
           tasksCompleted: milestone.tasks.filter(t => t.status === 'complete').length,
         });
       } else {
+        // Check if this is a rate limit pause (not a real failure)
+        if (milestoneResult.rateLimitPaused) {
+          onProgress?.(
+            'milestone-paused',
+            `Milestone paused (rate limit): ${milestone.name}`
+          );
+          onProgress?.(
+            'milestone-paused',
+            'Your progress is saved. Run /resume after the rate limit resets to continue.'
+          );
+
+          await logger.info('milestone', 'milestone_paused', `Milestone paused due to rate limit: ${milestone.name}`, {
+            milestoneId: milestone.id,
+            milestoneName: milestone.name,
+          });
+
+          // Reload state to get latest
+          state = await loadProject(projectDir);
+
+          return {
+            success: false,
+            state,
+            completedTasks,
+            failedTasks,
+            rateLimitPaused: true,
+            error: milestoneResult.error,
+          };
+        }
+
+        // Actual failure
         onProgress?.(
           'milestone-failed',
           `Milestone failed: ${milestone.name} - ${milestoneResult.error}`

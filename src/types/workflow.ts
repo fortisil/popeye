@@ -16,13 +16,13 @@ export type WorkflowPhase = z.infer<typeof WorkflowPhaseSchema>;
 /**
  * Project status
  */
-export const ProjectStatusSchema = z.enum(['pending', 'in-progress', 'complete', 'failed']);
+export const ProjectStatusSchema = z.enum(['pending', 'in-progress', 'complete', 'failed', 'paused']);
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 
 /**
  * Status of a task or milestone
  */
-export const TaskStatusSchema = z.enum(['pending', 'in-progress', 'complete', 'failed']);
+export const TaskStatusSchema = z.enum(['pending', 'in-progress', 'complete', 'failed', 'paused']);
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
 /**
