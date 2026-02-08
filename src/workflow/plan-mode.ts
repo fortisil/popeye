@@ -5,6 +5,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { isWorkspace } from '../types/project.js';
 import type { ProjectSpec, OutputLanguage } from '../types/project.js';
 import type { ProjectState, Milestone, Task } from '../types/workflow.js';
 import type { ConsensusConfig } from '../types/consensus.js';
@@ -103,12 +104,45 @@ export async function getProjectContext(
 ): Promise<string> {
   onProgress?.('Analyzing existing codebase...');
 
-  // Check if directory has any code
+  // Check if directory has any code - check root AND apps/ subdirectories
   try {
-    const files = await fs.readdir(projectDir);
-    const hasCode = files.some((f) =>
-      ['.py', '.ts', '.js', '.tsx', '.jsx'].some((ext) => f.endsWith(ext))
-    );
+    const codeExtensions = ['.py', '.ts', '.js', '.tsx', '.jsx'];
+    const hasCodeInDir = async (dir: string): Promise<boolean> => {
+      try {
+        const files = await fs.readdir(dir);
+        return files.some((f) => codeExtensions.some((ext) => f.endsWith(ext)));
+      } catch {
+        return false;
+      }
+    };
+
+    let hasCode = await hasCodeInDir(projectDir);
+
+    // Also check apps/ subdirectories for monorepo/workspace projects
+    if (!hasCode) {
+      const appsDir = path.join(projectDir, 'apps');
+      try {
+        const appEntries = await fs.readdir(appsDir, { withFileTypes: true });
+        for (const entry of appEntries) {
+          if (entry.isDirectory()) {
+            const appHasCode = await hasCodeInDir(path.join(appsDir, entry.name));
+            if (appHasCode) {
+              hasCode = true;
+              break;
+            }
+            // Check one level deeper (apps/frontend/src/)
+            const srcDir = path.join(appsDir, entry.name, 'src');
+            const srcHasCode = await hasCodeInDir(srcDir);
+            if (srcHasCode) {
+              hasCode = true;
+              break;
+            }
+          }
+        }
+      } catch {
+        // No apps/ directory
+      }
+    }
 
     if (!hasCode) {
       onProgress?.('No existing code found');
@@ -927,7 +961,7 @@ export async function runPlanMode(
       });
 
       // Validate fullstack plan structure
-      if (spec.language === 'fullstack') {
+      if (isWorkspace(spec.language)) {
         onProgress?.('create-plan', 'Validating fullstack plan structure...');
         const validation = validateFullstackPlan(plan);
 
@@ -958,7 +992,7 @@ export async function runPlanMode(
       {
         projectDir,
         config: consensusConfig,
-        isFullstack: spec.language === 'fullstack',
+        isFullstack: isWorkspace(spec.language),
         language: spec.language,
         onIteration: (iteration, result) => {
           onProgress?.(

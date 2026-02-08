@@ -4,6 +4,7 @@
  */
 
 import { Command } from 'commander';
+import { createRequire } from 'node:module';
 import {
   createAuthCommand,
   createCreateCommand,
@@ -24,9 +25,11 @@ export * from './interactive.js';
 export * from './commands/index.js';
 
 /**
- * Package version (will be replaced during build)
+ * Package version - read from package.json
  */
-const VERSION = '1.0.0';
+const require = createRequire(import.meta.url);
+const packageJson = require('../../package.json');
+export const VERSION: string = packageJson.version;
 
 /**
  * Create the main CLI program

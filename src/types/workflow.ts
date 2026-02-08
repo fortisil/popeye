@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import { OutputLanguageSchema } from './project.js';
 import type { OutputLanguage, OpenAIModel } from './project.js';
 import type { ConsensusIteration } from './consensus.js';
 
@@ -191,7 +192,7 @@ export const ProjectStateSchema = z.object({
   id: z.string(),
   name: z.string(),
   idea: z.string(),
-  language: z.enum(['python', 'typescript', 'fullstack']),
+  language: OutputLanguageSchema,
   openaiModel: z.enum(['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini']),
   phase: WorkflowPhaseSchema,
   status: ProjectStatusSchema,

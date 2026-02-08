@@ -5,6 +5,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { isWorkspace } from '../types/project.js';
 import type { ProjectState, Task, Milestone } from '../types/workflow.js';
 import type { ConsensusConfig } from '../types/consensus.js';
 import { createPlan as claudeCreatePlan } from '../adapters/claude.js';
@@ -331,7 +332,7 @@ Task: ${task.name}
             taskId: task.id,
             taskName: task.name,
             parallelReviews: true,
-            isFullstack: state.language === 'fullstack',
+            isFullstack: isWorkspace(state.language),
             onIteration: (iteration, result) => {
               onProgress?.('task-consensus', `Iteration ${iteration}: ${result.score}%`);
             },
@@ -346,7 +347,7 @@ Task: ${task.name}
           {
             projectDir,
             config: consensusConfig,
-            isFullstack: state.language === 'fullstack',
+            isFullstack: isWorkspace(state.language),
             language: state.language,
             onIteration: (iteration, result) => {
               onProgress?.('task-consensus', `Iteration ${iteration}: ${result.score}%`);

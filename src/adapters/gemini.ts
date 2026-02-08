@@ -8,9 +8,9 @@ import type { ConsensusResult, ArbitrationResult } from '../types/consensus.js';
 import { getGeminiToken } from '../auth/index.js';
 
 /**
- * Supported Gemini models
+ * Gemini model type - flexible string to support new models
  */
-export type GeminiModel = 'gemini-2.0-flash' | 'gemini-1.5-pro' | 'gemini-1.5-flash';
+export type GeminiModel = string;
 
 /**
  * Default Gemini configuration

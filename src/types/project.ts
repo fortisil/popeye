@@ -59,6 +59,16 @@ export function hasApp(language: OutputLanguage, app: AppType): boolean {
 }
 
 /**
+ * Checks if a language is a workspace type (multi-app monorepo)
+ *
+ * @param language - The output language
+ * @returns True if the language uses workspace/monorepo structure
+ */
+export function isWorkspace(language: OutputLanguage): boolean {
+  return language === 'fullstack' || language === 'all';
+}
+
+/**
  * Commands configuration for a workspace app
  */
 export interface WorkspaceAppCommands {
@@ -230,16 +240,15 @@ export interface WebsiteSpec {
 }
 
 /**
- * Supported OpenAI models for consensus reviews
+ * Known OpenAI models (used for suggestions and display, not strict validation)
  */
-export const OpenAIModelSchema = z.enum([
-  'gpt-4o',
-  'gpt-4o-mini',
-  'gpt-4-turbo',
-  'o1-preview',
-  'o1-mini',
-]);
-export type OpenAIModel = z.infer<typeof OpenAIModelSchema>;
+export const KNOWN_OPENAI_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'] as const;
+
+/**
+ * OpenAI model schema - accepts any non-empty string to support new models
+ */
+export const OpenAIModelSchema = z.string().min(1, 'Model name must not be empty');
+export type OpenAIModel = string;
 
 /**
  * Project specification provided by user

@@ -7,7 +7,11 @@ import {
   ProjectSpecSchema,
   OutputLanguageSchema,
   OpenAIModelSchema,
+  isWorkspace,
+  languageToApps,
+  hasApp,
 } from '../../src/types/project.js';
+import type { OutputLanguage } from '../../src/types/project.js';
 
 describe('ProjectSpecSchema', () => {
   describe('valid inputs', () => {
@@ -78,11 +82,22 @@ describe('ProjectSpecSchema', () => {
       expect(result.success).toBe(false);
     });
 
-    it('should reject invalid OpenAI model', () => {
+    it('should accept new/custom OpenAI model names', () => {
       const spec = {
         idea: 'Build something great',
         language: 'python',
-        openaiModel: 'invalid-model',
+        openaiModel: 'gpt-5.2-turbo',
+      };
+
+      const result = ProjectSpecSchema.safeParse(spec);
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject empty OpenAI model', () => {
+      const spec = {
+        idea: 'Build something great',
+        language: 'python',
+        openaiModel: '',
       };
 
       const result = ProjectSpecSchema.safeParse(spec);
@@ -101,14 +116,12 @@ describe('ProjectSpecSchema', () => {
 });
 
 describe('OutputLanguageSchema', () => {
-  it('should accept python', () => {
-    const result = OutputLanguageSchema.safeParse('python');
-    expect(result.success).toBe(true);
-  });
-
-  it('should accept typescript', () => {
-    const result = OutputLanguageSchema.safeParse('typescript');
-    expect(result.success).toBe(true);
+  it('should accept all 5 valid languages', () => {
+    const validLanguages = ['python', 'typescript', 'fullstack', 'website', 'all'];
+    for (const lang of validLanguages) {
+      const result = OutputLanguageSchema.safeParse(lang);
+      expect(result.success).toBe(true);
+    }
   });
 
   it('should reject invalid language', () => {
@@ -117,18 +130,80 @@ describe('OutputLanguageSchema', () => {
   });
 });
 
-describe('OpenAIModelSchema', () => {
-  it('should accept all valid models', () => {
-    const validModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'];
+describe('isWorkspace', () => {
+  it('should return true for fullstack', () => {
+    expect(isWorkspace('fullstack')).toBe(true);
+  });
 
-    for (const model of validModels) {
+  it('should return true for all', () => {
+    expect(isWorkspace('all')).toBe(true);
+  });
+
+  it('should return false for python', () => {
+    expect(isWorkspace('python')).toBe(false);
+  });
+
+  it('should return false for typescript', () => {
+    expect(isWorkspace('typescript')).toBe(false);
+  });
+
+  it('should return false for website', () => {
+    expect(isWorkspace('website')).toBe(false);
+  });
+});
+
+describe('languageToApps', () => {
+  it('should return backend for python', () => {
+    expect(languageToApps('python')).toEqual(['backend']);
+  });
+
+  it('should return frontend for typescript', () => {
+    expect(languageToApps('typescript')).toEqual(['frontend']);
+  });
+
+  it('should return frontend and backend for fullstack', () => {
+    expect(languageToApps('fullstack')).toEqual(['frontend', 'backend']);
+  });
+
+  it('should return website for website', () => {
+    expect(languageToApps('website')).toEqual(['website']);
+  });
+
+  it('should return all three for all', () => {
+    expect(languageToApps('all')).toEqual(['frontend', 'backend', 'website']);
+  });
+});
+
+describe('hasApp', () => {
+  it('should detect backend in python', () => {
+    expect(hasApp('python', 'backend')).toBe(true);
+    expect(hasApp('python', 'frontend')).toBe(false);
+  });
+
+  it('should detect all apps in all', () => {
+    expect(hasApp('all', 'frontend')).toBe(true);
+    expect(hasApp('all', 'backend')).toBe(true);
+    expect(hasApp('all', 'website')).toBe(true);
+  });
+});
+
+describe('OpenAIModelSchema', () => {
+  it('should accept known models', () => {
+    const knownModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'];
+
+    for (const model of knownModels) {
       const result = OpenAIModelSchema.safeParse(model);
       expect(result.success).toBe(true);
     }
   });
 
-  it('should reject invalid model', () => {
-    const result = OpenAIModelSchema.safeParse('gpt-5');
+  it('should accept new/unknown models (flexible)', () => {
+    expect(OpenAIModelSchema.safeParse('gpt-5').success).toBe(true);
+    expect(OpenAIModelSchema.safeParse('gpt-5.2-turbo').success).toBe(true);
+  });
+
+  it('should reject empty string', () => {
+    const result = OpenAIModelSchema.safeParse('');
     expect(result.success).toBe(false);
   });
 });

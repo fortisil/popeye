@@ -313,6 +313,9 @@ popeye create "A React component library for data visualization" --language type
 # Create a Fullstack project (React frontend + FastAPI backend)
 popeye create "A task management app with user authentication" --language fullstack
 
+# Create a Website project (Next.js marketing/landing site)
+popeye create "A marketing website with blog and pricing page" --language website
+
 # Create an ALL project (React app + FastAPI backend + Marketing website)
 popeye create "A SaaS product with landing page and dashboard" --language all
 ```
@@ -349,7 +352,7 @@ Popeye provides real-time feedback:
 
 - **Fully Autonomous**: Runs from idea to complete project without manual intervention
 - **Dual-AI Consensus**: Plans validated by multiple AI systems before execution
-- **Multi-Language Support**: Generate projects in Python, TypeScript, or Fullstack (React + FastAPI)
+- **Multi-Language Support**: Generate projects in Python, TypeScript, Fullstack (React + FastAPI), Website, or ALL (React + FastAPI + Website)
 - **Automatic Testing**: Tests are generated and run for each implementation
 - **Error Recovery**: Failed tests trigger automatic fix attempts (up to 3 retries)
 - **Auto-Generated README**: At project completion, generates a comprehensive README with:
@@ -358,6 +361,8 @@ Popeye provides real-time feedback:
   - Environment setup guide
   - How to run (development, tests, production)
   - Project structure overview
+- **Project Type Upgrade**: Upgrade projects in-place (e.g., python to fullstack, fullstack to all) with automatic file restructuring, scaffolding, and planning integration
+- **Flexible Model Switching**: Use any AI model name for OpenAI, Gemini, or Grok providers -- not limited to a predefined list
 
 ### Automatic UI/UX Design
 
@@ -527,7 +532,7 @@ popeye create "A CLI tool for converting markdown to PDF" \
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-n, --name <name>` | Project name | Derived from idea |
-| `-l, --language <lang>` | `python`, `typescript`, `fullstack`, or `all` | `python` |
+| `-l, --language <lang>` | `python`, `typescript`, `fullstack`, `website`, or `all` | `python` |
 | `-d, --directory <dir>` | Output directory | Current directory |
 | `-m, --model <model>` | OpenAI model for consensus | `gpt-4o` |
 
@@ -607,7 +612,11 @@ popeye
 /config                    View/edit configuration
 /config reviewer <ai>      Set reviewer (openai/gemini/grok)
 /config arbitrator <ai>    Set arbitrator (openai/gemini/grok/off)
-/lang <lang>               Set language (py/ts/fs or python/typescript/fullstack)
+/config model              Manage AI models via config subcommand
+/lang <lang>               Set language (py/ts/fs/web/all)
+/model [provider] [model]  Show/set AI model (openai/gemini/grok)
+/model <provider> list     Show known models for a provider
+/upgrade [target]          Upgrade project type (e.g., fullstack -> all)
 /info                      Show system info (Claude CLI status, API keys, etc.)
 /clear                     Clear screen
 /exit                      Exit interactive mode
@@ -617,14 +626,83 @@ popeye
 - `/lang py` or `/lang python` - Python projects
 - `/lang ts` or `/lang typescript` - TypeScript projects
 - `/lang fs` or `/lang fullstack` - Fullstack projects (React + FastAPI)
-- `/lang all` or `/lang web` - ALL projects (React + FastAPI + Website)
+- `/lang web` or `/lang website` - Website projects (Next.js SSG/SSR)
+- `/lang all` - ALL projects (React + FastAPI + Website)
 
 **Status Bar Indicators:**
 The input box shows current configuration:
-- Language: `py`, `ts`, or `fs`
+- Language: `py`, `ts`, `fs`, `web`, or `all`
 - Reviewer: `O` (OpenAI), `G` (Gemini), or `X` (Grok)
 - Arbitrator: `O`, `G`, `X`, or `-` (disabled)
 - Auth status: Filled circle when all required APIs are authenticated
+
+### Model Switching (`/model`)
+
+The `/model` command supports multi-provider model switching across OpenAI, Gemini, and Grok. Model names are flexible -- any valid model string is accepted, not just a predefined list. Unknown models are accepted with a warning note, allowing you to use newly released models immediately.
+
+```bash
+# Show current models for all providers
+/model
+
+# Set model for a specific provider
+/model openai gpt-5
+/model gemini gemini-2.5-pro
+/model grok grok-3
+
+# List known models for a provider (suggestions only)
+/model openai list
+/model gemini list
+
+# Backward compatible: set OpenAI model directly
+/model gpt-4o-mini
+```
+
+**Known Models (for reference):**
+
+| Provider | Known Models |
+|----------|-------------|
+| OpenAI | `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `o1-preview`, `o1-mini` |
+| Gemini | `gemini-2.0-flash`, `gemini-1.5-pro`, `gemini-1.5-flash` |
+| Grok | `grok-3` (flexible string, any model accepted) |
+
+All three model values (openaiModel, geminiModel, grokModel) are:
+- Persisted to `popeye.md` and loaded automatically on resume
+- Passed through to the consensus workflow for the reviewer and arbitrator
+- Displayed by `/config` and `/config model`
+
+### Project Type Upgrade (`/upgrade`)
+
+The `/upgrade` command allows upgrading an existing project to a more comprehensive type without starting over. The upgrade is transactional: it creates backups before making changes and rolls back on failure.
+
+```bash
+# Show valid upgrade targets for current project
+/upgrade
+
+# Upgrade to a specific target
+/upgrade fullstack
+/upgrade all
+```
+
+**Valid Upgrade Paths:**
+
+| From | Valid Targets | Description |
+|------|-------------|-------------|
+| `python` | `fullstack`, `all` | Add frontend (and website), move backend to `apps/backend/` |
+| `typescript` | `fullstack`, `all` | Add backend (and website), move frontend to `apps/frontend/` |
+| `fullstack` | `all` | Add website app to existing workspace |
+| `website` | `all` | Add frontend + backend, move website to `apps/website/` |
+| `all` | (none) | Already the most comprehensive type |
+
+**What happens during an upgrade:**
+
+1. **Backup**: Critical files are backed up for rollback
+2. **Restructure**: For single-app projects (python, typescript, website), existing code is moved into the `apps/` monorepo structure
+3. **Scaffold**: New app directories are created with starter files
+4. **Update State**: Project state and workspace configuration are updated
+5. **Validate**: The upgrade result is verified (directories exist, state is correct)
+6. **Plan**: After a successful upgrade, Popeye automatically builds context about the existing project and triggers planning mode focused only on the new apps and integration tasks
+
+The planner receives explicit instructions to focus only on new apps and not rebuild existing ones, along with integration guidance tailored to the specific upgrade path.
 
 ## Configuration
 
@@ -644,6 +722,9 @@ When you create a new project, Popeye automatically generates a `popeye.md` file
 language: fullstack
 reviewer: openai
 arbitrator: gemini
+openaiModel: gpt-4o
+geminiModel: gemini-2.0-flash
+grokModel: grok-3
 created: 2024-01-15T10:30:00.000Z
 lastRun: 2024-01-15T14:45:00.000Z
 projectName: task-manager
@@ -664,13 +745,16 @@ Add any guidance or notes for Claude here...
 - **Language**: fullstack
 - **Reviewer**: openai
 - **Arbitrator**: gemini
+- **OpenAI Model**: gpt-4o
+- **Gemini Model**: gemini-2.0-flash
+- **Grok Model**: grok-3
 
 ## Session History
 - 2024-01-15: Project created
 - 2024-01-15: Last session
 ```
 
-This means you no longer need to run `/lang fullstack` every time you resume a project - the configuration is automatically restored.
+This means you no longer need to run `/lang fullstack` or `/model` every time you resume a project - the configuration (including all three model selections) is automatically restored.
 
 ### Global Configuration File
 
@@ -691,13 +775,18 @@ consensus:
 # API settings
 apis:
   openai:
-    model: gpt-4o
+    model: gpt-4o             # Accepts any model name (e.g., gpt-5)
     temperature: 0.3
     max_tokens: 4096
   gemini:
-    model: gemini-2.0-flash
+    model: gemini-2.0-flash   # Accepts any model name
     temperature: 0.3
     max_tokens: 4096
+  grok:
+    model: grok-3             # Accepts any model name
+    temperature: 0.3
+    max_tokens: 4096
+    api_url: https://api.x.ai/v1
 
 # Rate limit settings
 rateLimit:
@@ -724,7 +813,7 @@ POPEYE_OPENAI_KEY=sk-...           # OpenAI API key
 
 # Optional
 POPEYE_GEMINI_KEY=...              # Gemini API key (for arbitration)
-POPEYE_DEFAULT_LANGUAGE=python     # Default output language
+POPEYE_DEFAULT_LANGUAGE=python     # Default output language (python/typescript/fullstack/website/all)
 POPEYE_OPENAI_MODEL=gpt-4o         # OpenAI model
 POPEYE_GEMINI_MODEL=gemini-2.0-flash  # Gemini model
 POPEYE_CONSENSUS_THRESHOLD=95      # Consensus threshold (0-100)
@@ -732,13 +821,14 @@ POPEYE_MAX_ITERATIONS=10           # Max iterations before escalation
 POPEYE_REVIEWER=openai             # Primary reviewer (openai, gemini, or grok)
 POPEYE_ARBITRATOR=gemini           # Arbitrator (openai, gemini, grok, or off)
 POPEYE_GROK_KEY=...                # Grok API key (optional)
+POPEYE_GROK_MODEL=grok-3           # Grok model (any model name accepted)
 POPEYE_LOG_LEVEL=debug             # Enable verbose logging
 ```
 
 ### Configuration Priority
 
 1. Environment variables (highest)
-2. Project-level `popeye.md` (for language, reviewer, arbitrator)
+2. Project-level `popeye.md` (for language, reviewer, arbitrator, and all 3 model selections)
 3. Project-level `popeye.config.yaml` or `.popeyerc.yaml`
 4. Global `~/.popeye/config.yaml`
 5. Built-in defaults (lowest)
@@ -1052,7 +1142,7 @@ src/
 ├── cli/                  # CLI interface
 │   ├── index.ts          # Command setup
 │   ├── output.ts         # Output formatting
-│   ├── interactive.ts    # REPL mode
+│   ├── interactive.ts    # REPL mode (with /model, /upgrade commands)
 │   └── commands/         # Individual commands
 ├── adapters/             # AI service adapters
 │   ├── claude.ts         # Claude Agent SDK (with rate limiting)
@@ -1063,22 +1153,30 @@ src/
 │   ├── keychain.ts       # Credential storage
 │   └── server.ts         # OAuth callback server
 ├── config/               # Configuration
-│   ├── schema.ts         # Zod schemas
+│   ├── schema.ts         # Zod schemas (uses OutputLanguageSchema for default_language)
 │   ├── defaults.ts       # Default values
 │   └── index.ts          # Config loading
 ├── generators/           # Project generators
 │   ├── python.ts         # Python scaffolding
 │   ├── typescript.ts     # TypeScript scaffolding
+│   ├── fullstack.ts      # Fullstack scaffolding (React + FastAPI)
+│   ├── website.ts        # Website scaffolding (Next.js)
+│   ├── all.ts            # ALL project scaffolding (exports 5 generator functions)
 │   └── templates/        # File templates
 ├── state/                # State management
 │   ├── persistence.ts    # File operations
 │   └── index.ts          # State API + verification
+├── upgrade/              # Project type upgrade system
+│   ├── transitions.ts    # Valid upgrade paths and transition details
+│   ├── handlers.ts       # Upgrade handlers (4 paths with file scaffolding)
+│   ├── index.ts          # Transactional orchestrator with backup/rollback
+│   └── context.ts        # Builds rich context for post-upgrade planning
 ├── workflow/             # Workflow engine
 │   ├── consensus.ts      # Consensus loop
-│   ├── plan-mode.ts      # Planning phase
+│   ├── plan-mode.ts      # Planning phase (monorepo-aware context scanning)
 │   ├── execution-mode.ts # Execution phase
 │   ├── milestone-workflow.ts
-│   ├── task-workflow.ts
+│   ├── task-workflow.ts  # Uses isWorkspace() for multi-app checks
 │   ├── test-runner.ts    # Test execution
 │   ├── workflow-logger.ts # Persistent logging
 │   ├── plan-storage.ts   # Consensus docs storage (per-app feedback)
@@ -1089,9 +1187,9 @@ src/
 │   ├── project-verification.ts # Project quality checks
 │   └── auto-fix.ts       # Automatic error fixing
 └── types/                # TypeScript types
-    ├── project.ts
-    ├── workflow.ts
-    └── consensus.ts
+    ├── project.ts        # OutputLanguage, isWorkspace(), flexible OpenAIModelSchema
+    ├── workflow.ts       # ProjectStateSchema (uses OutputLanguageSchema)
+    └── consensus.ts      # GeminiModelSchema, GrokModelSchema, KNOWN_GEMINI_MODELS
 ```
 
 ## Development

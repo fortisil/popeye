@@ -7,6 +7,7 @@
 export {
   OutputLanguageSchema,
   OpenAIModelSchema,
+  KNOWN_OPENAI_MODELS,
   ProjectSpecSchema,
   OPENAI_MODELS,
   languageToApps,
@@ -56,6 +57,7 @@ export {
   DEFAULT_CONSENSUS_CONFIG,
   DEFAULT_GROK_MODEL,
   AIProviderSchema,
+  KNOWN_GEMINI_MODELS,
   GeminiModelSchema,
   GrokModelSchema,
   type AIProvider,

@@ -6,6 +6,12 @@
 import * as readline from 'node:readline';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+
+// Get package version
+const require = createRequire(import.meta.url);
+const packageJson = require('../../package.json');
+const VERSION: string = packageJson.version;
 import {
   getAuthStatusForDisplay,
   authenticateClaude,
@@ -22,10 +28,12 @@ import {
   resumeWorkflow,
   getWorkflowStatus,
   getWorkflowSummary,
+  resetWorkflow,
 } from '../workflow/index.js';
 import {
   analyzeProjectProgress,
   verifyProjectCompletion,
+  storeSpecification,
 } from '../state/index.js';
 import { generateProject } from '../generators/index.js';
 import {
@@ -33,8 +41,14 @@ import {
   formatProjectForDisplay,
 } from '../state/registry.js';
 import { loadConfig, saveConfig } from '../config/index.js';
+import { getValidUpgradeTargets, getTransitionDetails } from '../upgrade/transitions.js';
+import { upgradeProject } from '../upgrade/index.js';
+import { buildUpgradeContext } from '../upgrade/context.js';
+import { OutputLanguageSchema, KNOWN_OPENAI_MODELS } from '../types/project.js';
 import type { ProjectSpec, OutputLanguage, OpenAIModel } from '../types/project.js';
-import type { AIProvider, GeminiModel } from '../types/consensus.js';
+import { GeminiModelSchema, KNOWN_GEMINI_MODELS } from '../types/consensus.js';
+import { OpenAIModelSchema } from '../types/project.js';
+import type { AIProvider, GeminiModel, GrokModel } from '../types/consensus.js';
 import {
   printSuccess,
   printError,
@@ -61,6 +75,9 @@ interface PopeyeProjectConfig {
   projectName?: string;
   description?: string;
   notes?: string;
+  openaiModel?: OpenAIModel;
+  geminiModel?: GeminiModel;
+  grokModel?: GrokModel;
 }
 
 /**
@@ -91,7 +108,7 @@ async function readPopeyeConfig(projectDir: string): Promise<PopeyeProjectConfig
 
         switch (key) {
           case 'language':
-            if (['python', 'typescript', 'fullstack'].includes(cleanValue)) {
+            if (OutputLanguageSchema.safeParse(cleanValue).success) {
               config.language = cleanValue as OutputLanguage;
             }
             break;
@@ -118,6 +135,21 @@ async function readPopeyeConfig(projectDir: string): Promise<PopeyeProjectConfig
             break;
           case 'projectName':
             config.projectName = cleanValue;
+            break;
+          case 'openaiModel':
+            if (OpenAIModelSchema.safeParse(cleanValue).success) {
+              config.openaiModel = cleanValue as OpenAIModel;
+            }
+            break;
+          case 'geminiModel':
+            if (GeminiModelSchema.safeParse(cleanValue).success) {
+              config.geminiModel = cleanValue as GeminiModel;
+            }
+            break;
+          case 'grokModel':
+            if (cleanValue.length > 0) {
+              config.grokModel = cleanValue;
+            }
             break;
         }
       }
@@ -159,6 +191,12 @@ async function writePopeyeConfig(
 ): Promise<void> {
   const configPath = path.join(projectDir, 'popeye.md');
 
+  const modelLines = [
+    config.openaiModel ? `openaiModel: ${config.openaiModel}` : '',
+    config.geminiModel ? `geminiModel: ${config.geminiModel}` : '',
+    config.grokModel ? `grokModel: ${config.grokModel}` : '',
+  ].filter(Boolean).join('\n');
+
   const content = `---
 # Popeye Project Configuration
 language: ${config.language}
@@ -167,6 +205,7 @@ arbitrator: ${config.enableArbitration ? config.arbitrator : 'off'}
 created: ${config.created}
 lastRun: ${new Date().toISOString()}
 ${config.projectName ? `projectName: ${config.projectName}` : ''}
+${modelLines}
 ---
 
 # ${config.projectName || 'Popeye Project'}
@@ -217,6 +256,9 @@ function applyPopeyeConfig(state: SessionState, config: PopeyeProjectConfig): vo
   state.reviewer = config.reviewer;
   state.arbitrator = config.arbitrator;
   state.enableArbitration = config.enableArbitration;
+  if (config.openaiModel) state.openaiModel = config.openaiModel;
+  if (config.geminiModel) state.geminiModel = config.geminiModel;
+  if (config.grokModel) state.grokModel = config.grokModel;
 }
 
 // Note: startSpinner, succeedSpinner, failSpinner, stopSpinner are used in handleIdea
@@ -241,8 +283,9 @@ const box = {
 interface SessionState {
   projectDir: string | null;
   language: OutputLanguage;
-  model: OpenAIModel;
+  openaiModel: OpenAIModel;
   geminiModel: GeminiModel;
+  grokModel: GrokModel;
   claudeAuth: boolean;
   openaiAuth: boolean;
   geminiAuth: boolean;
@@ -264,7 +307,7 @@ function getTerminalWidth(): number {
  */
 function drawHeader(): void {
   const width = getTerminalWidth();
-  const title = ' Popeye CLI ';
+  const title = ` Popeye CLI v${VERSION} `;
   const subtitle = ' Autonomous Code Generation with AI Consensus ';
 
   // Top border
@@ -780,7 +823,9 @@ function showHelp(): void {
     ['/config', 'Show/change configuration'],
     ['/config reviewer', 'Set reviewer (openai/gemini/grok)'],
     ['/config arbitrator', 'Set arbitrator (openai/gemini/grok/off)'],
-    ['/lang <lang>', 'Set language (python/typescript/fullstack)'],
+    ['/lang <lang>', 'Set language (be/fe/fs/web/all)'],
+    ['/model [provider] [model]', 'Show/set AI model (openai/gemini/grok)'],
+    ['/upgrade [target]', 'Upgrade project type (e.g., fullstack -> all)'],
     ['/new <idea>', 'Force start a new project (skips existing check)'],
     ['/resume', 'Resume interrupted project'],
     ['/clear', 'Clear screen'],
@@ -931,6 +976,10 @@ async function handleInput(input: string, state: SessionState): Promise<boolean>
 
       case '/resume':
         await handleResume(state, args);
+        break;
+
+      case '/upgrade':
+        await handleUpgrade(state, args);
         break;
 
       case '/new':
@@ -1090,9 +1139,13 @@ async function handleConfig(state: SessionState, args: string[] = []): Promise<v
         }
         return;
 
+      case 'model':
+        handleModel(args.slice(1), state);
+        return;
+
       default:
         printError(`Unknown config option: ${subcommand}`);
-        printInfo('Options: reviewer, arbitrator, language');
+        printInfo('Options: reviewer, arbitrator, language, model');
         return;
     }
   }
@@ -1110,10 +1163,15 @@ async function handleConfig(state: SessionState, args: string[] = []): Promise<v
   console.log(`    ${theme.dim('Grok:')}       ${state.grokAuth ? theme.success('● Ready') : theme.dim('○ Not configured')}`);
   console.log();
   console.log(theme.primary.bold('  AI Configuration:'));
-  const configReviewerName = state.reviewer === 'openai' ? 'OpenAI (GPT-4o)' : state.reviewer === 'grok' ? 'Grok' : 'Gemini';
+  const configReviewerName = state.reviewer === 'openai' ? `OpenAI (${state.openaiModel})` : state.reviewer === 'grok' ? `Grok (${state.grokModel})` : `Gemini (${state.geminiModel})`;
   const configArbitratorName = state.arbitrator === 'openai' ? 'OpenAI' : state.arbitrator === 'grok' ? 'Grok' : 'Gemini';
   console.log(`    ${theme.dim('Reviewer:')}   ${theme.primary(configReviewerName)}`);
   console.log(`    ${theme.dim('Arbitrator:')} ${state.enableArbitration ? theme.primary(configArbitratorName) : theme.dim('Disabled')}`);
+  console.log();
+  console.log(theme.primary.bold('  Models:'));
+  console.log(`    ${theme.dim('OpenAI:')}     ${theme.primary(state.openaiModel)}`);
+  console.log(`    ${theme.dim('Gemini:')}     ${theme.primary(state.geminiModel)}`);
+  console.log(`    ${theme.dim('Grok:')}       ${theme.primary(state.grokModel)}`);
   console.log();
   console.log(theme.primary.bold('  Consensus:'));
   console.log(`    ${theme.dim('Threshold:')}  ${config.consensus.threshold}%`);
@@ -1123,6 +1181,7 @@ async function handleConfig(state: SessionState, args: string[] = []): Promise<v
   console.log(theme.dim('    /config reviewer <openai|gemini|grok>'));
   console.log(theme.dim('    /config arbitrator <openai|gemini|grok|off>'));
   console.log(theme.dim('    /config language <be|fe|fs|web|all>'));
+  console.log(theme.dim('    /config model <provider> <model>'));
   console.log();
 }
 
@@ -1178,27 +1237,281 @@ function handleLanguage(args: string[], state: SessionState): void {
 }
 
 /**
- * Handle /model command
+ * Available models per provider for display
+ */
+const KNOWN_MODELS: Record<string, readonly string[]> = {
+  openai: KNOWN_OPENAI_MODELS,
+  gemini: KNOWN_GEMINI_MODELS,
+  grok: ['grok-3', 'grok-3-mini', 'grok-2'],
+};
+
+/**
+ * Handle /model command - multi-provider model switching
  */
 function handleModel(args: string[], state: SessionState): void {
-  const validModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'];
-
+  // /model (no args) -> show all provider models
   if (args.length === 0) {
     console.log();
-    printKeyValue('Current model', state.model);
-    printInfo(`Available: ${validModels.join(', ')}`);
+    console.log(theme.primary.bold('  Models:'));
+    console.log(`    ${theme.dim('OpenAI:')}  ${theme.primary(state.openaiModel)}`);
+    console.log(`    ${theme.dim('Gemini:')}  ${theme.primary(state.geminiModel)}`);
+    console.log(`    ${theme.dim('Grok:')}    ${theme.primary(state.grokModel)}`);
+    console.log();
+    console.log(theme.secondary('  Usage:'));
+    console.log(theme.dim('    /model <provider> <model>    Set model for provider'));
+    console.log(theme.dim('    /model <provider> list       Show available models'));
+    console.log(theme.dim('    /model <openai-model>        Set OpenAI model (shortcut)'));
     return;
   }
 
-  const model = args[0] as OpenAIModel;
-  if (!validModels.includes(model)) {
-    printError(`Invalid model. Use one of: ${validModels.join(', ')}`);
+  const firstArg = args[0].toLowerCase();
+
+  // Check if first arg is a provider
+  if (firstArg === 'openai' || firstArg === 'gemini' || firstArg === 'grok') {
+    const provider = firstArg;
+
+    // /model <provider> or /model <provider> list -> show known models
+    if (args.length === 1 || args[1]?.toLowerCase() === 'list') {
+      console.log();
+      const currentModel = provider === 'openai' ? state.openaiModel
+        : provider === 'gemini' ? state.geminiModel : state.grokModel;
+      console.log(theme.primary.bold(`  ${provider} models:`));
+      console.log(`    ${theme.dim('Current:')} ${theme.primary(currentModel)}`);
+      console.log(`    ${theme.dim('Known models:')}`);
+      for (const m of KNOWN_MODELS[provider]) {
+        const marker = m === currentModel ? theme.success(' (active)') : '';
+        console.log(`      ${theme.secondary(m)}${marker}`);
+      }
+      console.log();
+      console.log(theme.dim('    Custom models are also accepted (e.g., gpt-5, gemini-2.5-pro)'));
+      return;
+    }
+
+    // /model <provider> <model> -> set model (warn if unknown but accept)
+    const newModel = args[1];
+
+    if (!newModel || newModel.length === 0) {
+      printError('Model name must not be empty.');
+      return;
+    }
+
+    const isKnown = KNOWN_MODELS[provider].includes(newModel);
+
+    if (provider === 'openai') {
+      state.openaiModel = newModel;
+    } else if (provider === 'gemini') {
+      state.geminiModel = newModel;
+    } else if (provider === 'grok') {
+      state.grokModel = newModel;
+    }
+
+    console.log();
+    if (isKnown) {
+      printSuccess(`${provider} model set to ${newModel}`);
+    } else {
+      printSuccess(`${provider} model set to ${newModel}`);
+      printInfo(`Note: '${newModel}' is not in the known models list. Make sure it's a valid ${provider} model.`);
+    }
     return;
   }
 
-  state.model = model;
+  // Backward compat: /model <known-openai-model> (auto-detect known OpenAI model name)
+  if ((KNOWN_OPENAI_MODELS as readonly string[]).includes(firstArg)) {
+    state.openaiModel = firstArg;
+    console.log();
+    printSuccess(`OpenAI model set to ${firstArg}`);
+    return;
+  }
+
+  printError(`Unknown provider: ${firstArg}`);
+  printInfo('Use: /model <openai|gemini|grok> <model>');
+}
+
+/**
+ * Handle /upgrade command - upgrade project type
+ */
+async function handleUpgrade(state: SessionState, args: string[]): Promise<void> {
+  if (!state.projectDir) {
+    printError('No active project. Start or resume a project first.');
+    return;
+  }
+
+  // Load current state to get language
+  const status = await getWorkflowStatus(state.projectDir);
+  if (!status.exists || !status.state) {
+    printError('No project state found in current directory.');
+    return;
+  }
+
+  const currentLanguage = status.state.language;
+  const validTargets = getValidUpgradeTargets(currentLanguage);
+
+  if (validTargets.length === 0) {
+    printInfo(`Project type '${currentLanguage}' is already at maximum scope. No upgrades available.`);
+    return;
+  }
+
+  // Determine target
+  let targetLanguage: OutputLanguage | null = null;
+
+  if (args.length > 0) {
+    const langAliases: Record<string, OutputLanguage> = {
+      'py': 'python', 'python': 'python', 'be': 'python', 'backend': 'python',
+      'ts': 'typescript', 'typescript': 'typescript', 'fe': 'typescript', 'frontend': 'typescript',
+      'fs': 'fullstack', 'fullstack': 'fullstack',
+      'web': 'website', 'website': 'website',
+      'all': 'all',
+    };
+    const resolved = langAliases[args[0].toLowerCase()];
+    if (resolved && validTargets.includes(resolved)) {
+      targetLanguage = resolved;
+    } else if (resolved) {
+      printError(`Cannot upgrade from '${currentLanguage}' to '${resolved}'.`);
+      printInfo(`Valid targets: ${validTargets.join(', ')}`);
+      return;
+    } else {
+      printError(`Unknown target: ${args[0]}`);
+      printInfo(`Valid targets: ${validTargets.join(', ')}`);
+      return;
+    }
+  } else {
+    // Prompt selection
+    const target = await promptSelection(
+      `Upgrade '${currentLanguage}' project to:`,
+      validTargets.map((t) => {
+        const details = getTransitionDetails(currentLanguage, t);
+        return {
+          value: t,
+          label: `${t} - ${details?.description || ''}`,
+        };
+      }),
+      validTargets[0],
+    );
+    targetLanguage = target as OutputLanguage;
+  }
+
+  if (!targetLanguage) return;
+
+  const transition = getTransitionDetails(currentLanguage, targetLanguage);
+  if (!transition) return;
+
+  // Show dry-run summary
   console.log();
-  printSuccess(`Model set to ${model}`);
+  console.log(theme.primary.bold('  Upgrade Summary:'));
+  console.log(`    ${theme.dim('From:')}          ${theme.primary(currentLanguage)}`);
+  console.log(`    ${theme.dim('To:')}            ${theme.primary(targetLanguage)}`);
+  console.log(`    ${theme.dim('New apps:')}      ${transition.newApps.join(', ') || 'none'}`);
+  console.log(`    ${theme.dim('Restructure:')}   ${transition.requiresRestructure ? 'Yes - code will be moved to apps/' : 'No'}`);
+  console.log(`    ${theme.dim('Description:')}   ${transition.description}`);
+  console.log();
+
+  // Confirm
+  const confirmed = await promptYesNo(
+    theme.primary('Proceed with upgrade?'),
+    true,
+  );
+
+  if (!confirmed) {
+    printInfo('Upgrade cancelled.');
+    return;
+  }
+
+  // Execute upgrade
+  console.log();
+  startSpinner(`Upgrading ${currentLanguage} -> ${targetLanguage}...`);
+
+  const result = await upgradeProject(state.projectDir, targetLanguage);
+
+  if (result.success) {
+    succeedSpinner(`Upgraded to ${targetLanguage}`);
+    state.language = targetLanguage;
+
+    console.log();
+    if (result.filesCreated.length > 0) {
+      printInfo(`Created ${result.filesCreated.length} new files`);
+    }
+    if (result.filesMoved.length > 0) {
+      printInfo(`Moved ${result.filesMoved.length} items`);
+    }
+    printSuccess(`Project upgraded from '${currentLanguage}' to '${targetLanguage}'`);
+
+    // Build upgrade context for planning
+    console.log();
+    startSpinner('Building expansion context...');
+
+    const upgradeContext = await buildUpgradeContext(
+      state.projectDir,
+      transition,
+      status.state!.idea || 'Project expansion',
+      currentLanguage,
+    );
+
+    succeedSpinner('Expansion context ready');
+
+    // Show what will be planned
+    console.log();
+    console.log(theme.primary.bold('  Expansion Planning:'));
+    console.log(`    ${theme.dim('Existing apps:')}  ${upgradeContext.existingApps.join(', ')} (already built)`);
+    console.log(`    ${theme.dim('New apps:')}       ${upgradeContext.newApps.join(', ')} (will be planned)`);
+    console.log();
+
+    // Ask user if they want to start planning now
+    const startPlanning = await promptYesNo(
+      theme.primary('Start planning the new apps now?'),
+      true,
+    );
+
+    if (!startPlanning) {
+      printInfo('You can start planning later with /resume');
+      return;
+    }
+
+    // Reset state to plan phase so workflow re-plans for the expanded project
+    // This clears old plan/milestones but keeps the idea and project metadata
+    await resetWorkflow(state.projectDir, 'plan');
+
+    // Clear old specification so the idea gets re-expanded for the new project scope
+    // The upgrade context will guide the planner to focus on new apps
+    await storeSpecification(state.projectDir, '');
+
+    console.log();
+    printInfo('Starting expansion planning...');
+    console.log();
+
+    const workflowResult = await resumeWorkflow(state.projectDir, {
+      consensusConfig: {
+        reviewer: state.reviewer,
+        arbitrator: state.arbitrator,
+        enableArbitration: state.enableArbitration,
+        openaiModel: state.openaiModel,
+        geminiModel: state.geminiModel,
+        grokModel: state.grokModel,
+      },
+      additionalContext: upgradeContext.summary,
+      onProgress: (phase, message) => {
+        console.log(`  ${theme.dim(`[${phase}]`)} ${message}`);
+      },
+    });
+
+    console.log();
+    if (workflowResult.success) {
+      printSuccess('Expansion planning and implementation complete!');
+      console.log(`    ${theme.dim('Location:')} ${state.projectDir}`);
+    } else if (workflowResult.rateLimitPaused) {
+      console.log(`  ${theme.warning('Rate Limit Reached')}`);
+      console.log(`  ${theme.dim(workflowResult.error || 'API rate limit exceeded')}`);
+      console.log();
+      console.log(`  ${theme.info('Your progress has been saved.')}`);
+      console.log(`  ${theme.dim('Run')} ${theme.highlight('/resume')} ${theme.dim('after the rate limit resets to continue.')}`);
+    } else {
+      printError(workflowResult.error || 'Expansion workflow failed');
+      printInfo('Use /resume to retry.');
+    }
+  } else {
+    failSpinner('Upgrade failed');
+    printError(result.error || 'Unknown error during upgrade');
+    printInfo('All changes have been rolled back.');
+  }
 }
 
 /**
@@ -1618,6 +1931,9 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
         reviewer: state.reviewer,
         arbitrator: state.arbitrator,
         enableArbitration: state.enableArbitration,
+        openaiModel: state.openaiModel,
+        geminiModel: state.geminiModel,
+        grokModel: state.grokModel,
       },
       additionalContext,
       onProgress: (phase, message) => {
@@ -1771,7 +2087,7 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
     idea: discovered.idea || discovered.plan?.slice(0, 500) || `Continue developing ${projectName}`,
     name: projectName,
     language: discovered.language || state.language,
-    openaiModel: state.model,
+    openaiModel: state.openaiModel,
     outputDir: state.projectDir,
   };
 
@@ -1789,6 +2105,9 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
       reviewer: state.reviewer,
       arbitrator: state.arbitrator,
       enableArbitration: state.enableArbitration,
+      openaiModel: state.openaiModel,
+      geminiModel: state.geminiModel,
+      grokModel: state.grokModel,
     },
     onProgress: (phase, message) => {
       console.log(`  ${theme.dim(`[${phase}]`)} ${message}`);
@@ -2028,14 +2347,14 @@ async function handleIdea(idea: string, state: SessionState): Promise<void> {
   console.log(`    ${theme.dim('Idea:')} ${idea}`);
   console.log(`    ${theme.dim('Name:')} ${theme.primary(projectName)}`);
   console.log(`    ${theme.dim('Language:')} ${theme.primary(state.language)}`);
-  console.log(`    ${theme.dim('Model:')} ${theme.secondary(state.model)}`);
+  console.log(`    ${theme.dim('Model:')} ${theme.secondary(state.openaiModel)}`);
   console.log();
 
   const spec: ProjectSpec = {
     idea,
     name: projectName,
     language: state.language,
-    openaiModel: state.model,
+    openaiModel: state.openaiModel,
     outputDir: cwd,
   };
 
@@ -2061,6 +2380,9 @@ async function handleIdea(idea: string, state: SessionState): Promise<void> {
     lastRun: new Date().toISOString(),
     projectName,
     description: idea,
+    openaiModel: state.openaiModel,
+    geminiModel: state.geminiModel,
+    grokModel: state.grokModel,
   });
   printInfo('Created popeye.md with project configuration');
 
@@ -2079,7 +2401,9 @@ async function handleIdea(idea: string, state: SessionState): Promise<void> {
       reviewer: state.reviewer,
       arbitrator: state.arbitrator,
       enableArbitration: state.enableArbitration,
+      openaiModel: state.openaiModel,
       geminiModel: state.geminiModel,
+      grokModel: state.grokModel,
     },
     onProgress: (phase, message) => {
       console.log(`  ${theme.dim(`[${phase}]`)} ${message}`);
@@ -2139,14 +2463,14 @@ async function handleNewProject(idea: string, state: SessionState): Promise<void
   console.log(`    ${theme.dim('Idea:')} ${idea}`);
   console.log(`    ${theme.dim('Name:')} ${theme.primary(projectName)}`);
   console.log(`    ${theme.dim('Language:')} ${theme.primary(state.language)}`);
-  console.log(`    ${theme.dim('Model:')} ${theme.secondary(state.model)}`);
+  console.log(`    ${theme.dim('Model:')} ${theme.secondary(state.openaiModel)}`);
   console.log();
 
   const spec: ProjectSpec = {
     idea,
     name: projectName,
     language: state.language,
-    openaiModel: state.model,
+    openaiModel: state.openaiModel,
     outputDir: cwd,
   };
 
@@ -2172,6 +2496,9 @@ async function handleNewProject(idea: string, state: SessionState): Promise<void
     lastRun: new Date().toISOString(),
     projectName,
     description: idea,
+    openaiModel: state.openaiModel,
+    geminiModel: state.geminiModel,
+    grokModel: state.grokModel,
   });
   printInfo('Created popeye.md with project configuration');
 
@@ -2190,7 +2517,9 @@ async function handleNewProject(idea: string, state: SessionState): Promise<void
       reviewer: state.reviewer,
       arbitrator: state.arbitrator,
       enableArbitration: state.enableArbitration,
+      openaiModel: state.openaiModel,
       geminiModel: state.geminiModel,
+      grokModel: state.grokModel,
     },
     onProgress: (phase, message) => {
       console.log(`  ${theme.dim(`[${phase}]`)} ${message}`);
@@ -2233,8 +2562,9 @@ export async function startInteractiveMode(): Promise<void> {
   const state: SessionState = {
     projectDir: process.cwd(),
     language: config.project.default_language,
-    model: config.apis.openai.model,
+    openaiModel: config.apis.openai.model,
     geminiModel: 'gemini-2.0-flash',
+    grokModel: config.apis.grok.model,
     claudeAuth: false,
     openaiAuth: false,
     geminiAuth: false,

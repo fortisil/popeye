@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod';
+import { OutputLanguageSchema } from '../types/project.js';
 
 /**
  * Consensus settings schema
@@ -92,7 +93,7 @@ export const TypeScriptSettingsSchema = z.object({
  * Project defaults schema
  */
 export const ProjectSettingsSchema = z.object({
-  default_language: z.enum(['python', 'typescript', 'fullstack']).default('python'),
+  default_language: OutputLanguageSchema.default('python'),
   python: PythonSettingsSchema.default({
     package_manager: 'pip',
     test_framework: 'pytest',
