@@ -15,6 +15,7 @@ import {
 import { iterateUntilConsensus, type ConsensusProcessResult } from './consensus.js';
 import { runTaskWorkflow, type TaskWorkflowResult } from './task-workflow.js';
 import { parsePlanMilestones } from './plan-mode.js';
+import { attemptRemediation, MAX_REMEDIATION_ATTEMPTS } from './remediation.js';
 
 /**
  * Options for milestone workflow
@@ -484,10 +485,86 @@ Tasks: ${milestone.tasks.length}
           };
         }
 
-        // Actual failure
-        onProgress?.('milestone-tasks', `Task failed: ${task.name}`);
+        // Actual failure - check if it's a rate limit masquerading as a failure
+        const isRateLimitFailure = taskResult.error &&
+          /rate.limit|rate_limit|too many requests|quota exceeded/i.test(taskResult.error);
 
-        // Update milestone status
+        if (isRateLimitFailure) {
+          onProgress?.('milestone-tasks', `Task failed due to rate limit: ${task.name} - pausing instead of remediating`);
+
+          state = await updateMilestoneInState(projectDir, milestone.id, {
+            status: 'paused',
+          });
+
+          return {
+            success: false,
+            milestone: { ...milestone, status: 'paused' },
+            planConsensus,
+            taskResults,
+            rateLimitPaused: true,
+            error: `Task "${task.name}" hit rate limit. Run /resume to continue.`,
+          };
+        }
+
+        // Attempt remediation before giving up
+        // Reload task from state to get current remediationAttempts
+        const latestState = await loadProject(projectDir);
+        const latestMilestone = latestState.milestones.find(m => m.id === milestone.id);
+        const latestTask = latestMilestone?.tasks.find(t => t.id === task.id);
+        const remediationAttempts = latestTask?.remediationAttempts || 0;
+
+        if (remediationAttempts < MAX_REMEDIATION_ATTEMPTS) {
+          onProgress?.('milestone-tasks', `Task failed: ${task.name} - attempting remediation (${remediationAttempts + 1}/${MAX_REMEDIATION_ATTEMPTS})`);
+
+          const remediationResult = await attemptRemediation(
+            milestone,
+            task,
+            taskResult,
+            {
+              projectDir,
+              consensusConfig,
+              onProgress,
+            }
+          );
+
+          // Handle rate limit pause during remediation
+          if (remediationResult.rateLimitPaused) {
+            onProgress?.('milestone-tasks', `Remediation paused (rate limit): ${task.name}`);
+
+            state = await updateMilestoneInState(projectDir, milestone.id, {
+              status: 'paused',
+            });
+
+            return {
+              success: false,
+              milestone: { ...milestone, status: 'paused' },
+              planConsensus,
+              taskResults,
+              rateLimitPaused: true,
+              error: `Remediation for "${task.name}" paused due to rate limit. Run /resume to continue.`,
+            };
+          }
+
+          // If remediation succeeded, replace the failed result and continue
+          if (remediationResult.success && remediationResult.taskResult) {
+            onProgress?.('milestone-tasks', `Remediation successful for: ${task.name}`);
+
+            // Replace the failed result with the successful one
+            taskResults[taskResults.length - 1] = remediationResult.taskResult;
+            onTaskComplete?.(task, true);
+
+            // Continue to next task
+            onProgress?.('milestone-tasks', `Task complete (after remediation): ${task.name}`);
+            continue;
+          }
+
+          // Remediation failed - fall through to milestone failure
+          onProgress?.('milestone-tasks', `Remediation failed for: ${task.name} - ${remediationResult.error}`);
+        } else {
+          onProgress?.('milestone-tasks', `Task failed: ${task.name} - max remediation attempts (${MAX_REMEDIATION_ATTEMPTS}) already reached`);
+        }
+
+        // Mark milestone as failed
         state = await updateMilestoneInState(projectDir, milestone.id, {
           status: 'failed',
         });

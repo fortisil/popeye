@@ -37,6 +37,14 @@ export interface VerificationReport {
 }
 
 /**
+ * Resolved project paths for frontend and backend directories
+ */
+export interface ProjectPaths {
+  frontendDir: string | null;
+  backendDir: string | null;
+}
+
+/**
  * Check if a file exists
  */
 async function fileExists(filePath: string): Promise<boolean> {
@@ -126,14 +134,65 @@ function findTodoPlaceholders(content: string): string[] {
 }
 
 /**
+ * Resolve the correct frontend/backend paths based on language and what exists on disk.
+ *
+ * Workspace projects (fullstack, all) use apps/ or packages/ subdirectories.
+ * Single-language projects use the project root as their frontend or backend dir.
+ *
+ * @param projectDir - The project root directory
+ * @param language - The project language/type
+ * @returns Resolved frontend and backend directory paths (null if not applicable)
+ */
+export async function resolveProjectPaths(projectDir: string, language: string): Promise<ProjectPaths> {
+  // Workspace projects (fullstack, all): check apps/ first, then packages/
+  if (language === 'fullstack' || language === 'all') {
+    const appsF = path.join(projectDir, 'apps', 'frontend');
+    const pkgsF = path.join(projectDir, 'packages', 'frontend');
+    const appsB = path.join(projectDir, 'apps', 'backend');
+    const pkgsB = path.join(projectDir, 'packages', 'backend');
+
+    return {
+      frontendDir: await fileExists(appsF) ? appsF : await fileExists(pkgsF) ? pkgsF : null,
+      backendDir: await fileExists(appsB) ? appsB : await fileExists(pkgsB) ? pkgsB : null,
+    };
+  }
+
+  // Website: root IS the frontend
+  if (language === 'website') {
+    return { frontendDir: projectDir, backendDir: null };
+  }
+
+  // TypeScript/JavaScript: root IS the frontend
+  if (language === 'typescript' || language === 'javascript') {
+    return { frontendDir: projectDir, backendDir: null };
+  }
+
+  // Python: root IS the backend
+  if (language === 'python') {
+    return { frontendDir: null, backendDir: projectDir };
+  }
+
+  return { frontendDir: null, backendDir: null };
+}
+
+/**
  * Verify CSS/Styling setup
  */
-async function verifyStylingSetup(projectDir: string): Promise<VerificationResult[]> {
+async function verifyStylingSetup(paths: ProjectPaths): Promise<VerificationResult[]> {
   const results: VerificationResult[] = [];
-  const frontendDir = path.join(projectDir, 'packages', 'frontend');
+  const frontendDir = paths.frontendDir;
+
+  if (!frontendDir) {
+    return results;
+  }
 
   // Check if frontend uses Tailwind classes
-  const tsxFiles = await findFiles(path.join(frontendDir, 'src'), /\.tsx$/);
+  const srcDir = path.join(frontendDir, 'src');
+  if (!await fileExists(srcDir)) {
+    return results;
+  }
+
+  const tsxFiles = await findFiles(srcDir, /\.tsx$/);
   let usesTailwind = false;
 
   for (const file of tsxFiles.slice(0, 20)) { // Check first 20 files
@@ -216,9 +275,13 @@ async function verifyStylingSetup(projectDir: string): Promise<VerificationResul
 /**
  * Verify authentication setup
  */
-async function verifyAuthSetup(projectDir: string): Promise<VerificationResult[]> {
+async function verifyAuthSetup(paths: ProjectPaths): Promise<VerificationResult[]> {
   const results: VerificationResult[] = [];
-  const frontendDir = path.join(projectDir, 'packages', 'frontend');
+  const frontendDir = paths.frontendDir;
+
+  if (!frontendDir) {
+    return results;
+  }
 
   // Check if project uses Auth0
   const pkgJson = await readFile(path.join(frontendDir, 'package.json'));
@@ -265,9 +328,13 @@ async function verifyAuthSetup(projectDir: string): Promise<VerificationResult[]
 /**
  * Verify routes are complete (no TODO placeholders)
  */
-async function verifyRouteCompleteness(projectDir: string): Promise<VerificationResult[]> {
+async function verifyRouteCompleteness(paths: ProjectPaths): Promise<VerificationResult[]> {
   const results: VerificationResult[] = [];
-  const frontendDir = path.join(projectDir, 'packages', 'frontend');
+  const frontendDir = paths.frontendDir;
+
+  if (!frontendDir) {
+    return results;
+  }
 
   // Check routes file
   const routesFile = await readFile(path.join(frontendDir, 'src', 'routes', 'index.tsx'));
@@ -288,7 +355,12 @@ async function verifyRouteCompleteness(projectDir: string): Promise<Verification
   }
 
   // Check all page components
-  const pageFiles = await findFiles(path.join(frontendDir, 'src', 'pages'), /\.tsx$/);
+  const pagesDir = path.join(frontendDir, 'src', 'pages');
+  if (!await fileExists(pagesDir)) {
+    return results;
+  }
+
+  const pageFiles = await findFiles(pagesDir, /\.tsx$/);
   const incompletePages: string[] = [];
 
   for (const file of pageFiles) {
@@ -325,13 +397,15 @@ async function verifyRouteCompleteness(projectDir: string): Promise<Verification
 /**
  * Verify database setup
  */
-async function verifyDatabaseSetup(projectDir: string): Promise<VerificationResult[]> {
+async function verifyDatabaseSetup(projectDir: string, paths: ProjectPaths): Promise<VerificationResult[]> {
   const results: VerificationResult[] = [];
-  const backendDir = path.join(projectDir, 'packages', 'backend');
+  const backendDir = paths.backendDir;
 
-  // Check .env.example has database config
-  const envExample = await readFile(path.join(projectDir, '.env.example')) ||
-                     await readFile(path.join(backendDir, '.env.example'));
+  // Check .env.example has database config (check root and backend dir)
+  let envExample = await readFile(path.join(projectDir, '.env.example'));
+  if (!envExample && backendDir) {
+    envExample = await readFile(path.join(backendDir, '.env.example'));
+  }
 
   const hasDbConfig = envExample?.includes('DATABASE_URL') ||
                       envExample?.includes('DB_HOST');
@@ -368,11 +442,35 @@ async function verifyDatabaseSetup(projectDir: string): Promise<VerificationResu
 /**
  * Verify the app actually starts
  */
-async function verifyAppStarts(projectDir: string): Promise<VerificationResult[]> {
+async function verifyAppStarts(paths: ProjectPaths): Promise<VerificationResult[]> {
   const results: VerificationResult[] = [];
-  const frontendDir = path.join(projectDir, 'packages', 'frontend');
+  const frontendDir = paths.frontendDir;
 
-  // Try to start frontend briefly
+  if (!frontendDir) {
+    return results;
+  }
+
+  // Verify directory exists before attempting build
+  if (!await fileExists(frontendDir)) {
+    return results;
+  }
+
+  // Check package.json exists and has a build script
+  const pkgJsonContent = await readFile(path.join(frontendDir, 'package.json'));
+  if (!pkgJsonContent) {
+    return results;
+  }
+
+  try {
+    const pkgJson = JSON.parse(pkgJsonContent);
+    if (!pkgJson.scripts?.build) {
+      return results;
+    }
+  } catch {
+    return results;
+  }
+
+  // Try to build frontend
   try {
     await execAsync('npm run build', {
       cwd: frontendDir,
@@ -404,27 +502,36 @@ async function verifyAppStarts(projectDir: string): Promise<VerificationResult[]
 
 /**
  * Run comprehensive project verification
+ *
+ * @param projectDir - The project root directory
+ * @param language - The project language/type (e.g. 'fullstack', 'typescript', 'python')
+ * @param onProgress - Optional progress callback
+ * @returns Verification report
  */
 export async function runComprehensiveVerification(
   projectDir: string,
+  language: string,
   onProgress?: (message: string) => void
 ): Promise<VerificationReport> {
   const allResults: VerificationResult[] = [];
 
+  // Resolve correct paths based on language and disk layout
+  const paths = await resolveProjectPaths(projectDir, language);
+
   onProgress?.('Checking styling setup...');
-  allResults.push(...await verifyStylingSetup(projectDir));
+  allResults.push(...await verifyStylingSetup(paths));
 
   onProgress?.('Checking authentication setup...');
-  allResults.push(...await verifyAuthSetup(projectDir));
+  allResults.push(...await verifyAuthSetup(paths));
 
   onProgress?.('Checking route completeness...');
-  allResults.push(...await verifyRouteCompleteness(projectDir));
+  allResults.push(...await verifyRouteCompleteness(paths));
 
   onProgress?.('Checking database setup...');
-  allResults.push(...await verifyDatabaseSetup(projectDir));
+  allResults.push(...await verifyDatabaseSetup(projectDir, paths));
 
   onProgress?.('Verifying app builds...');
-  allResults.push(...await verifyAppStarts(projectDir));
+  allResults.push(...await verifyAppStarts(paths));
 
   // Calculate summary
   const passedChecks = allResults.filter(r => r.passed).length;

@@ -14,7 +14,7 @@ import {
   updateState,
 } from '../state/index.js';
 import { iterateUntilConsensus, runOptimizedConsensusProcess, type ConsensusProcessResult } from './consensus.js';
-import { executeTask as executeTaskCode } from './execution-mode.js';
+import { executeTask as executeTaskCode, handleTestFailure } from './execution-mode.js';
 import { runTests, testsExist, getTestSummary, type TestResult } from './test-runner.js';
 
 /**
@@ -222,6 +222,119 @@ async function updateTaskInState(
   }));
 
   return updateState(projectDir, { milestones: updatedMilestones });
+}
+
+/**
+ * Detect if the failure is a test runner crash (0 passed, many failed)
+ * vs actual individual test failures
+ */
+function isTestRunnerCrash(testResult: TestResult): boolean {
+  return testResult.passed === 0 && testResult.failed > 20;
+}
+
+/**
+ * Detect which app a task targets from its name (e.g., "[BE]", "[FE]", "[WEB]")
+ */
+function detectTaskApp(taskName: string): string | null {
+  if (taskName.includes('[BE]') || taskName.toLowerCase().includes('backend')) return 'backend';
+  if (taskName.includes('[FE]') || taskName.toLowerCase().includes('frontend')) return 'frontend';
+  if (taskName.includes('[WEB]') || taskName.toLowerCase().includes('website')) return 'website';
+  return null;
+}
+
+/**
+ * Build a fix plan for test failures that can be reviewed by consensus
+ *
+ * @param task - The task whose tests failed
+ * @param testResult - The test result with failure details
+ * @param state - Current project state
+ * @returns A plan string describing the proposed fix
+ */
+function buildTestFixPlan(
+  task: Task,
+  testResult: TestResult,
+  state: ProjectState,
+): string {
+  const isCrash = isTestRunnerCrash(testResult);
+  const targetApp = detectTaskApp(task.name);
+
+  // For crashes, extract the first error (usually the root cause)
+  const outputSnippet = isCrash
+    ? testResult.output.slice(0, 3000)
+    : testResult.output.slice(0, 2000);
+
+  if (isCrash) {
+    return `## Test Runner Crash - Fix Plan
+
+### Task: ${task.name}
+### Language: ${state.language}
+${targetApp ? `### Target App: ${targetApp}` : ''}
+
+### CRITICAL: Test Runner Crashed
+The test runner crashed with 0 passed out of ${testResult.failed} total tests.
+This is NOT ${testResult.failed} individual failures - this is a **startup/import crash**.
+
+### Most Likely Root Causes (check in this order)
+1. **Import error** - A new file imports a module that doesn't exist or has a typo
+2. **Syntax error** - A new or modified file has invalid syntax
+3. **Missing dependency** - A package is used but not installed
+4. **Circular import** - New code creates a circular dependency
+5. **Config error** - Test config (vitest.config, jest.config, pytest.ini) was broken
+
+### Test Output (look for the FIRST error)
+\`\`\`
+${outputSnippet}
+\`\`\`
+
+### Fix Approach
+1. Find the FIRST error in the output above - that's the root cause
+2. Fix that single error (likely a broken import or syntax issue)
+3. Do NOT try to fix ${testResult.failed} individual tests - they all fail because of the one root cause
+${targetApp ? `4. Focus ONLY on files in the apps/${targetApp}/ directory` : ''}
+
+### Review Checklist
+- [ ] Identified the single root cause (import/syntax/config error)
+- [ ] Fix targets the root cause, not symptoms
+- [ ] No unrelated code changes
+`;
+  }
+
+  // Normal case: individual test failures
+  const failedTests = testResult.failedTests?.map(t => `- ${t}`).join('\n') || '(see output)';
+
+  return `## Test Failure Fix Plan
+
+### Task: ${task.name}
+### Language: ${state.language}
+${targetApp ? `### Target App: ${targetApp}` : ''}
+
+### Test Results
+- Passed: ${testResult.passed}
+- Failed: ${testResult.failed}
+- Total: ${testResult.total}
+
+### Failed Tests
+${failedTests}
+
+### Test Output (truncated)
+\`\`\`
+${outputSnippet}
+\`\`\`
+
+### Proposed Fix Approach
+1. Analyze the root cause of each test failure from the output above
+2. Identify whether the issue is in the implementation code (most likely) or the test expectations
+3. Fix the implementation code to satisfy the test assertions
+4. Do NOT modify the tests unless they contain clear bugs
+5. Ensure fixes don't break other passing tests
+${targetApp ? `6. Focus ONLY on files in the apps/${targetApp}/ directory` : ''}
+
+### Review Checklist
+- [ ] Root cause correctly identified for each failure
+- [ ] Fix addresses the actual problem, not just the symptom
+- [ ] No regressions introduced to passing tests
+- [ ] Code changes are minimal and focused
+`;
 }
 
 /**
@@ -486,11 +599,131 @@ Task: ${task.name}
           break;
         }
 
-        retries++;
-        if (retries <= maxRetries) {
-          onProgress?.('task-test', `Tests failed, retry ${retries}/${maxRetries}...`);
-          // Could add fix attempt here
+        // Build failure reason for visibility
+        const isCrash = isTestRunnerCrash(testResult);
+        let failureReason: string;
+
+        if (isCrash) {
+          // Extract first meaningful error line from output
+          const errorLines = testResult.output.split('\n')
+            .filter(l => /error|Error|ERROR|failed to|cannot find|SyntaxError|ImportError|ModuleNotFound/i.test(l))
+            .slice(0, 2);
+          const rootCause = errorLines.length > 0
+            ? errorLines[0].trim().slice(0, 120)
+            : 'test runner crashed';
+          failureReason = `TEST RUNNER CRASH (0/${testResult.failed} passed) - ${rootCause}`;
+        } else {
+          const failedNames = testResult.failedTests?.slice(0, 5).join(', ') || '';
+          failureReason = failedNames
+            ? `${testResult.failed} failed: ${failedNames}${(testResult.failedTests?.length || 0) > 5 ? '...' : ''}`
+            : testResult.error || getTestSummary(testResult);
         }
+
+        // Tests failed - check if retries exhausted
+        if (retries >= maxRetries) {
+          onProgress?.('task-test', `Tests failed after ${retries} retries (${failureReason})`);
+          break;
+        }
+
+        retries++;
+        onProgress?.('task-test', `Tests failed (${failureReason}), planning fix ${retries}/${maxRetries}...`);
+
+        // Build a fix plan and get consensus before implementing
+        const fixPlan = buildTestFixPlan(task, testResult, state);
+        const fixContext = `
+Project: ${state.name}
+Language: ${state.language}
+Milestone: ${milestone.name}
+Task: ${task.name}
+Phase: Test failure fix (attempt ${retries}/${maxRetries})
+`.trim();
+
+        const useOptimized = consensusConfig?.useOptimizedConsensus !== false;
+        let fixConsensus: ConsensusProcessResult;
+
+        if (useOptimized) {
+          onProgress?.('task-test', `Getting consensus on fix plan (attempt ${retries}/${maxRetries})...`);
+          fixConsensus = await runOptimizedConsensusProcess(
+            fixPlan,
+            fixContext,
+            {
+              projectDir,
+              config: consensusConfig,
+              milestoneId: milestone.id,
+              milestoneName: milestone.name,
+              taskId: task.id,
+              taskName: `${task.name} - Test Fix ${retries}`,
+              parallelReviews: true,
+              isFullstack: isWorkspace(state.language),
+              onIteration: (iteration, result) => {
+                onProgress?.('task-test', `Fix consensus iteration ${iteration}: ${result.score}%`);
+              },
+              onProgress,
+            }
+          );
+        } else {
+          onProgress?.('task-test', `Getting consensus on fix plan (attempt ${retries}/${maxRetries})...`);
+          fixConsensus = await iterateUntilConsensus(
+            fixPlan,
+            fixContext,
+            {
+              projectDir,
+              config: consensusConfig,
+              isFullstack: isWorkspace(state.language),
+              language: state.language,
+              onIteration: (iteration, result) => {
+                onProgress?.('task-test', `Fix consensus iteration ${iteration}: ${result.score}%`);
+              },
+              onProgress,
+            }
+          );
+        }
+
+        if (!fixConsensus.approved) {
+          onProgress?.('task-test', `Fix plan not approved (${fixConsensus.finalScore}%), skipping fix`);
+          break;
+        }
+
+        onProgress?.('task-test', `Fix plan approved (${fixConsensus.finalScore}%), implementing fix...`);
+
+        // Implement the consensus-approved fix
+        const fixResult = await handleTestFailure(
+          task,
+          testResult,
+          fixConsensus.bestPlan,
+          projectDir,
+          (msg) => onProgress?.('task-test', msg),
+        );
+
+        if (!fixResult.success) {
+          // Check if this is a rate limit pause (not a real failure)
+          if (fixResult.rateLimitPaused) {
+            const resetInfo = fixResult.rateLimitInfo;
+            const pauseMessage = resetInfo?.message || 'Rate limit reached';
+
+            state = await updateTaskInState(projectDir, task.id, {
+              status: 'paused',
+              error: `Rate limit during test fix: ${pauseMessage}. Run /resume to continue.`,
+            });
+
+            onProgress?.('task-test', `Test fix paused due to rate limit: ${pauseMessage}`);
+            onProgress?.('task-test', 'Your progress is saved. Run /resume to continue after the rate limit resets.');
+
+            return {
+              success: false,
+              task: { ...task, status: 'paused' },
+              consensusResult,
+              testResult,
+              rateLimitPaused: true,
+              error: `Rate limit: ${pauseMessage}`,
+            };
+          }
+
+          onProgress?.('task-test', `Fix attempt ${retries} failed: ${fixResult.error || 'unknown error'}`);
+          break;
+        }
+
+        onProgress?.('task-test', `Fix ${retries} applied, re-running tests...`);
       }
 
       if (testResult && !testResult.success) {

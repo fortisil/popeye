@@ -41,6 +41,7 @@ export * from './ui-designer.js';
 export * from './ui-verification.js';
 export * from './project-verification.js';
 export * from './auto-fix.js';
+export * from './project-structure.js';
 // Note: plan-parser.js exports are accessible but have naming conflicts with plan-mode.js
 // Import directly from './plan-parser.js' if you need the extended TaskAppTag type (includes 'WEB')
 export * from './separation-guard.js';

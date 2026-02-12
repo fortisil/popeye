@@ -303,6 +303,21 @@ function getTerminalWidth(): number {
 }
 
 /**
+ * Get a human-readable build label for the project language type
+ */
+function getBuildLabel(language: string): string {
+  switch (language) {
+    case 'typescript': return 'Frontend (TypeScript)';
+    case 'javascript': return 'Frontend (JavaScript)';
+    case 'python': return 'Python';
+    case 'fullstack': return 'Fullstack (FE + BE)';
+    case 'website': return 'Website';
+    case 'all': return 'Fullstack + Website';
+    default: return language;
+  }
+}
+
+/**
  * Draw the header box
  */
 function drawHeader(): void {
@@ -1802,6 +1817,17 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
       console.log(`    ${theme.dim('Pending:')}    ${progressAnalysis.pendingTasks} task(s)`);
     }
 
+    // Show build verification status
+    const projectExplicitlyCompleted = status.state.status === 'complete' && status.state.phase === 'complete';
+    const buildLabel = getBuildLabel(status.state.language);
+    if (projectExplicitlyCompleted) {
+      console.log(`    ${theme.dim('Build:')}      ${theme.success(`${buildLabel} build passed`)}`);
+    } else if (status.state.error && /build/i.test(status.state.error)) {
+      console.log(`    ${theme.dim('Build:')}      ${theme.error(`${buildLabel} build failed`)}`);
+    } else if (verification.isComplete && !projectExplicitlyCompleted) {
+      console.log(`    ${theme.dim('Build:')}      ${theme.warning(`${buildLabel} build not verified`)}`);
+    }
+
     // Show plan file comparison
     if (progressAnalysis.planTaskCount > 0) {
       console.log();
@@ -1893,12 +1919,27 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
       console.log(theme.error(`  Error: ${status.state.error}`));
     }
 
-    // If project says complete but isn't, inform user we'll continue
-    if (verification.isComplete) {
+    // A project is only truly complete if completeProject() was called after
+    // successful build verification (sets status='complete', phase='complete').
+    // If all tasks are done but status is still 'in-progress', the final
+    // verification phase (build, tests, README) never completed successfully.
+    if (verification.isComplete && projectExplicitlyCompleted) {
       console.log();
       printSuccess('Project is fully complete!');
-      printInfo(`All ${progressAnalysis.totalTasks} tasks across ${progressAnalysis.totalMilestones} milestones are done.`);
+      console.log();
+      console.log(theme.primary.bold('  Project Summary:'));
+      console.log(`    ${theme.dim('Milestones:')} ${progressAnalysis.totalMilestones}/${progressAnalysis.totalMilestones} complete`);
+      console.log(`    ${theme.dim('Tasks:')}      ${progressAnalysis.totalTasks}/${progressAnalysis.totalTasks} complete (100%)`);
+      console.log(`    ${theme.dim('Build:')}      ${theme.success(`${buildLabel} build passed`)}`);
+      console.log(`    ${theme.dim('Location:')}   ${state.projectDir}`);
       return;
+    }
+
+    // All tasks complete but project was never explicitly marked complete
+    // This means final verification (build, tests, etc.) never passed
+    if (verification.isComplete && !projectExplicitlyCompleted) {
+      console.log();
+      printInfo('All tasks complete but final verification (build/tests) has not passed yet - re-running...');
     }
 
     // Check if user provided context as argument
@@ -1951,8 +1992,39 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
         status.state.language
       );
 
-      printSuccess('Workflow completed!');
-      console.log(`    ${theme.dim('Location:')} ${state.projectDir}`);
+      // Show full project completion summary
+      const execResult = result.executionResult;
+      const completedState = result.state;
+      const totalMilestones = completedState?.milestones?.length || progressAnalysis.totalMilestones;
+      const totalTasks = completedState?.milestones?.reduce((sum, m) => sum + m.tasks.length, 0) || progressAnalysis.totalTasks;
+      const bLabel = getBuildLabel(status.state.language);
+
+      printSuccess('Project Complete!');
+      console.log();
+      console.log(theme.primary.bold('  Project Summary:'));
+      console.log(`    ${theme.dim('Name:')}       ${status.state.name}`);
+      console.log(`    ${theme.dim('Language:')}   ${theme.primary(status.state.language)}`);
+      console.log(`    ${theme.dim('Location:')}   ${state.projectDir}`);
+      console.log(`    ${theme.dim('Milestones:')} ${totalMilestones}/${totalMilestones} complete`);
+      console.log(`    ${theme.dim('Tasks:')}      ${totalTasks}/${totalTasks} complete (100%)`);
+
+      // Build status
+      const buildSt = execResult?.buildStatus || 'passed';
+      if (buildSt === 'passed') {
+        console.log(`    ${theme.dim('Build:')}      ${theme.success(`${bLabel} build passed`)}`);
+      } else {
+        console.log(`    ${theme.dim('Build:')}      ${theme.error(`${bLabel} build failed`)}`);
+      }
+
+      // Test status
+      const testSt = execResult?.testStatus || 'skipped';
+      if (testSt === 'passed') {
+        console.log(`    ${theme.dim('Tests:')}      ${theme.success('All tests passed')}`);
+      } else if (testSt === 'failed') {
+        console.log(`    ${theme.dim('Tests:')}      ${theme.error('Some tests failed')}`);
+      } else if (testSt === 'no-tests') {
+        console.log(`    ${theme.dim('Tests:')}      ${theme.dim('No tests found')}`);
+      }
     } else if (result.rateLimitPaused) {
       // Rate limit pause - show friendly message, not an error
       console.log();
@@ -1964,6 +2036,14 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
       console.log();
     } else {
       printError(result.error || 'Workflow failed');
+
+      // Show build status if available (helps user understand what failed)
+      const failExec = result.executionResult;
+      if (failExec?.buildStatus === 'failed') {
+        const failBuildLabel = getBuildLabel(status.state.language);
+        console.log(`    ${theme.dim('Build:')} ${theme.error(`${failBuildLabel} build failed`)}`);
+      }
+
       printInfo('You can run /resume again with additional guidance');
     }
     return;

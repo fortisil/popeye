@@ -56,6 +56,11 @@ export interface Task {
   testResultsDoc?: string;          // Path to test results document
   implementationComplete?: boolean; // Whether code implementation finished (for resume)
 
+  // Remediation tracking (for failure recovery)
+  remediationAttempts?: number;       // Number of remediation attempts made
+  lastFailureAnalysis?: string;       // Root cause analysis from last failure
+  lastRemediationPlan?: string;       // Fix plan from last remediation attempt
+
   // Per-app consensus tracking (fullstack projects)
   frontendConsensus?: AppConsensusTracking;
   backendConsensus?: AppConsensusTracking;
@@ -93,6 +98,10 @@ export const TaskSchema = z.object({
   planDoc: z.string().optional(),
   testResultsDoc: z.string().optional(),
   implementationComplete: z.boolean().optional(),
+  // Remediation tracking
+  remediationAttempts: z.number().optional(),
+  lastFailureAnalysis: z.string().optional(),
+  lastRemediationPlan: z.string().optional(),
   // Per-app consensus tracking (fullstack)
   frontendConsensus: AppConsensusTrackingSchema.optional(),
   backendConsensus: AppConsensusTrackingSchema.optional(),

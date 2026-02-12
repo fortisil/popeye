@@ -8,7 +8,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ProjectState, Task, Milestone } from '../types/workflow.js';
 import type { ConsensusConfig } from '../types/consensus.js';
-import { generateCode, type ClaudeExecuteResult } from '../adapters/claude.js';
+import { generateCode, createPlan as claudeCreatePlan, type ClaudeExecuteResult } from '../adapters/claude.js';
 import {
   loadProject,
   updateState,
@@ -25,9 +25,86 @@ import {
 } from './test-runner.js';
 import { getWorkflowLogger } from './workflow-logger.js';
 import { buildWithAutoFix } from './auto-fix.js';
-import { runComprehensiveVerification, autoFixIssues } from './project-verification.js';
+import { runComprehensiveVerification, autoFixIssues, resolveProjectPaths } from './project-verification.js';
 import { setupUI } from './ui-setup.js';
 import { designUI, saveUISpecification, loadUISpecification } from './ui-designer.js';
+import { iterateUntilConsensus, runOptimizedConsensusProcess, type ConsensusProcessResult } from './consensus.js';
+import { isWorkspace } from '../types/project.js';
+import { getProjectStructureSummary } from './project-structure.js';
+
+/**
+ * Parse unique file paths from TypeScript error output
+ * Handles both TS formats: `path(line,col): error TS` and `path:line:col - error TS`
+ *
+ * @param buildOutput - Raw build error output
+ * @returns Array of unique, normalized file paths
+ */
+export function parseErrorFilePaths(buildOutput: string): string[] {
+  // Strip ANSI color codes
+  const clean = buildOutput.replace(/\x1b\[[0-9;]*m/g, '');
+  const paths = new Set<string>();
+
+  // Format 1: path(line,col): error TS
+  const pattern1 = /^(?:ERROR in\s+)?(.+?)\(\d+,\d+\): error TS/gm;
+  // Format 2: path:line:col - error TS
+  const pattern2 = /^(?:ERROR in\s+)?(.+?):\d+:\d+\s*-\s*error TS/gm;
+
+  for (const pattern of [pattern1, pattern2]) {
+    let match;
+    while ((match = pattern.exec(clean)) !== null) {
+      let filePath = match[1].trim();
+      // Normalize backslashes to forward slashes
+      filePath = filePath.replace(/\\/g, '/');
+      paths.add(filePath);
+    }
+  }
+
+  // Filter out virtual/non-project paths
+  const filtered = Array.from(paths).filter(p => {
+    const excluded = ['node_modules/', 'vite/', '@types/', 'virtual:', '__generated__'];
+    if (excluded.some(ex => p.includes(ex))) return false;
+    // Only include paths that look project-relative
+    const projectPrefixes = ['src/', 'apps/', 'packages/', './', 'lib/', 'components/'];
+    return projectPrefixes.some(prefix => p.startsWith(prefix)) || p.startsWith('/');
+  });
+
+  return filtered;
+}
+
+/**
+ * Check which file paths exist on disk and which are missing
+ *
+ * @param projectDir - Project root directory
+ * @param filePaths - File paths to check (relative or absolute)
+ * @returns Analysis of existing vs missing files with summary
+ */
+export async function analyzeFileExistence(
+  projectDir: string,
+  filePaths: string[]
+): Promise<{ existing: string[]; missing: string[]; summary: string }> {
+  const existing: string[] = [];
+  const missing: string[] = [];
+
+  for (const filePath of filePaths) {
+    const absolutePath = path.isAbsolute(filePath)
+      ? filePath
+      : path.join(projectDir, filePath);
+
+    try {
+      await fs.access(absolutePath);
+      existing.push(filePath);
+    } catch {
+      missing.push(filePath);
+    }
+  }
+
+  const total = filePaths.length;
+  const summary = total === 0
+    ? 'No error files to check'
+    : `${existing.length}/${total} error files exist, ${missing.length}/${total} MISSING from disk`;
+
+  return { existing, missing, summary };
+}
 
 /**
  * Options for execution mode
@@ -65,6 +142,10 @@ export interface ExecutionModeResult {
   error?: string;
   /** True if execution paused due to rate limiting (not a failure) */
   rateLimitPaused?: boolean;
+  /** Build verification status */
+  buildStatus?: 'passed' | 'failed' | 'skipped';
+  /** Test verification status */
+  testStatus?: 'passed' | 'failed' | 'skipped' | 'no-tests';
 }
 
 /**
@@ -669,9 +750,9 @@ export async function runExecutionMode(
     onProgress?.('ui-setup', 'Running UI setup and design system configuration...');
     await logger.stageStart('ui-setup', 'Starting UI setup');
 
-    // Check if this is a frontend project
-    const frontendDir = path.join(projectDir, 'packages', 'frontend');
-    const hasFrontend = await fs.access(frontendDir).then(() => true).catch(() => false);
+    // Check if this is a frontend project (resolve correct path based on language)
+    const uiPaths = await resolveProjectPaths(projectDir, state.language);
+    const hasFrontend = !!uiPaths.frontendDir;
 
     if (hasFrontend) {
       try {
@@ -768,19 +849,257 @@ export async function runExecutionMode(
         autoFixed: buildResult.autoFixed,
       });
 
-      // Block completion if build fails
-      onProgress?.(
-        'verification-error',
-        'BLOCKING: Cannot complete project with build errors. Please fix manually and resume.'
+      // Attempt consensus-driven build fix before giving up
+      onProgress?.('build-fix', 'Analyzing project structure...');
+      const buildErrors = buildResult.output.slice(0, 4000);
+
+      // Gather project structure context for informed fix analysis
+      const structureSummary = await getProjectStructureSummary(projectDir, state.language);
+      const buildErrorFiles = parseErrorFilePaths(buildErrors);
+      const fileExistenceAnalysis = await analyzeFileExistence(projectDir, buildErrorFiles);
+
+      // CLI banner for structural issues
+      if (buildResult.structuralIssue) {
+        onProgress?.(
+          'build-fix',
+          `STRUCTURAL ISSUE: ${buildResult.missingFileCount}/${buildResult.totalErrorFiles} TypeScript error files do not exist on disk. Likely wrong paths or missing generated project files.`
+        );
+      }
+
+      onProgress?.('build-fix', 'Creating build fix plan for consensus review...');
+
+      // Build structural context sections for prompts
+      const structureSection = `## Project Structure\n${structureSummary.formatted}`;
+      const existenceSection = `## File Existence Analysis\n${fileExistenceAnalysis.summary}\n${
+        fileExistenceAnalysis.missing.length > 0
+          ? `Missing files (${Math.min(fileExistenceAnalysis.missing.length, 20)} of ${fileExistenceAnalysis.missing.length}):\n${fileExistenceAnalysis.missing.slice(0, 20).map(f => `  - ${f}`).join('\n')}`
+          : 'All error files exist on disk.'
+      }`;
+
+      // Build structural issue guidance if applicable
+      let structuralIssueSection = '';
+      if (buildResult.structuralIssue) {
+        structuralIssueSection = `## STRUCTURAL ISSUE DETECTED
+This is a MISSING FILES problem, not a code bugs problem.
+${fileExistenceAnalysis.missing.length} of ${buildErrorFiles.length} error files do not exist on disk.
+
+### Common Root Causes
+- Wrong project type/template generated (expected app folder not created)
+- Wrong working directory / baseDir
+- Wrong import paths after refactor
+- tsconfig includes non-existent folders
+- Generator wrote files to a different root
+
+### Strategy Guidance
+The fix MUST create missing files or fix import/generation paths, NOT edit non-existent files.
+Pay special attention to WHY files don't exist - the root cause is almost always a path or generation issue.`;
+      }
+
+      // For structural issues, reduce raw error dump and show targeted info instead
+      const errorDumpSection = buildResult.structuralIssue
+        ? `## Build Errors (representative sample - ${buildErrorFiles.length} files with errors, ${fileExistenceAnalysis.missing.length} missing)\n\`\`\`\n${buildErrors.slice(0, 1500)}\n\`\`\``
+        : `## Build Output (errors)\n\`\`\`\n${buildErrors}\n\`\`\``;
+
+      // Step 1: Have Claude analyze build errors and create a fix plan
+      const fixPlanPrompt = `Analyze the following build errors and create a detailed fix plan.
+
+${errorDumpSection}
+
+${structureSection}
+
+${existenceSection}
+
+${structuralIssueSection}
+
+## Project: ${state.name}
+## Language: ${state.language}
+
+Provide:
+
+### Root Cause Analysis
+Identify each distinct build error and its root cause.
+Pay special attention to WHY files don't exist if files are missing.
+
+### Fix Plan
+For each error:
+1. The specific file and line causing the error
+2. What change is needed
+3. Why this change fixes it
+
+### Files to Modify
+List each file with the exact changes needed.
+
+### Verification
+How to verify the fixes work (build command to run).
+
+Be specific and actionable. Do NOT suggest deleting or gutting files.`;
+
+      const fixPlanResult = await claudeCreatePlan(
+        fixPlanPrompt,
+        `Build fix analysis for: ${state.name}`,
+        state.language,
+        (msg) => onProgress?.('build-fix', `[analysis] ${msg}`)
       );
 
-      return {
-        success: false,
-        state,
-        completedTasks,
-        failedTasks,
-        error: 'Build verification failed - project not complete',
-      };
+      if (!fixPlanResult.success) {
+        // If plan creation fails (rate limit), handle gracefully
+        if (fixPlanResult.rateLimitPaused) {
+          onProgress?.('build-fix', 'Build fix paused due to rate limit. Run /resume to retry.');
+          await updateState(projectDir, { status: 'paused', error: 'Build fix paused due to rate limit' });
+          return { success: false, state, completedTasks, failedTasks, error: 'Build fix paused due to rate limit', rateLimitPaused: true, buildStatus: 'failed' };
+        }
+
+        onProgress?.('build-fix', `Build fix analysis failed: ${fixPlanResult.error}`);
+        await updateState(projectDir, { status: 'failed', error: 'Build verification failed - could not analyze errors' });
+        return { success: false, state, completedTasks, failedTasks, error: 'Build verification failed - project not complete', buildStatus: 'failed' };
+      }
+
+      // Step 2: Get consensus on the build fix plan
+      onProgress?.('build-fix-consensus', 'Getting consensus on build fix plan...');
+
+      // Build enriched consensus context with structure awareness
+      const consensusMissingList = fileExistenceAnalysis.missing.length > 0
+        ? `\nMissing files (${Math.min(fileExistenceAnalysis.missing.length, 15)} of ${fileExistenceAnalysis.missing.length}):\n${fileExistenceAnalysis.missing.slice(0, 15).map(f => `  - ${f}`).join('\n')}`
+        : '';
+
+      const buildFixContext = `
+Project: ${state.name}
+Language: ${state.language}
+Phase: BUILD FIX VERIFICATION
+Reason: All tasks complete but build is failing
+
+${structureSection}
+
+## File Existence Analysis
+${fileExistenceAnalysis.summary}${consensusMissingList}
+${buildResult.structuralIssue ? '\nSTRUCTURAL ISSUE: Majority of error files are missing from disk. This is a missing files problem, not a code bugs problem.' : ''}
+
+## Build Errors
+\`\`\`
+${buildResult.structuralIssue ? buildErrors.slice(0, 1500) : buildErrors.slice(0, 2000)}
+\`\`\`
+`.trim();
+
+      const consensusConfig = options.consensusConfig;
+      const useOptimized = consensusConfig?.useOptimizedConsensus !== false;
+      let buildFixConsensus: ConsensusProcessResult;
+
+      try {
+        if (useOptimized) {
+          buildFixConsensus = await runOptimizedConsensusProcess(
+            fixPlanResult.response,
+            buildFixContext,
+            {
+              projectDir,
+              config: consensusConfig,
+              milestoneId: 'build-fix',
+              milestoneName: 'Build Fix Verification',
+              parallelReviews: true,
+              isFullstack: isWorkspace(state.language),
+              onIteration: (iteration, result) => {
+                onProgress?.('build-fix-consensus', `Build fix consensus iteration ${iteration}: ${result.score}%`);
+              },
+              onProgress,
+            }
+          ) as ConsensusProcessResult;
+        } else {
+          buildFixConsensus = await iterateUntilConsensus(
+            fixPlanResult.response,
+            buildFixContext,
+            {
+              projectDir,
+              config: consensusConfig,
+              isFullstack: isWorkspace(state.language),
+              language: state.language,
+              onIteration: (iteration, result) => {
+                onProgress?.('build-fix-consensus', `Build fix consensus iteration ${iteration}: ${result.score}%`);
+              },
+              onProgress,
+            }
+          );
+        }
+      } catch (consensusError) {
+        const errMsg = consensusError instanceof Error ? consensusError.message : 'Unknown error';
+        onProgress?.('build-fix-consensus', `Build fix consensus failed: ${errMsg}`);
+        await updateState(projectDir, { status: 'failed', error: `Build fix consensus failed: ${errMsg}` });
+        return { success: false, state, completedTasks, failedTasks, error: 'Build verification failed - project not complete' };
+      }
+
+      if (!buildFixConsensus.approved) {
+        onProgress?.('build-fix-consensus', `Build fix plan not approved (${buildFixConsensus.finalScore}%)`);
+        await updateState(projectDir, { status: 'failed', error: `Build fix not approved (${buildFixConsensus.finalScore}%)` });
+        return { success: false, state, completedTasks, failedTasks, error: 'Build verification failed - project not complete' };
+      }
+
+      onProgress?.('build-fix-consensus', `Build fix plan approved (${buildFixConsensus.finalScore}%)`);
+
+      // Step 3: Implement the consensus-approved fix
+      onProgress?.('build-fix', 'Implementing consensus-approved build fix...');
+
+      // Enrich implementation context with structure + file existence awareness
+      const implementationContext = [
+        `Build fix for project: ${state.name}`,
+        structureSection,
+        `File existence: ${fileExistenceAnalysis.summary}`,
+      ].join('\n\n');
+
+      const claudeFixResult = await generateCode(
+        `Implement this consensus-approved build fix plan:\n\n${buildFixConsensus.bestPlan}`,
+        implementationContext,
+        {
+          cwd: projectDir,
+          onProgress: (msg) => onProgress?.('build-fix', `[fix] ${msg}`),
+        }
+      );
+
+      if (claudeFixResult.rateLimitPaused) {
+        onProgress?.('build-fix', 'Build fix paused due to rate limit. Run /resume to retry.');
+        await updateState(projectDir, { status: 'paused', error: 'Build fix paused due to rate limit' });
+        return { success: false, state, completedTasks, failedTasks, error: 'Build fix paused due to rate limit', rateLimitPaused: true, buildStatus: 'failed' };
+      }
+
+      if (!claudeFixResult.success) {
+        onProgress?.('build-fix', `Build fix implementation failed: ${claudeFixResult.error}`);
+        await updateState(projectDir, { status: 'failed', error: 'Build fix implementation failed' });
+        return { success: false, state, completedTasks, failedTasks, error: 'Build verification failed - project not complete', buildStatus: 'failed' };
+      }
+
+      // Step 4: Re-run build to verify the fix worked
+      onProgress?.('verification', 'Consensus-approved fix applied, re-running build verification...');
+      const retryBuild = await buildWithAutoFix(
+        projectDir,
+        state.language,
+        2,
+        (msg) => onProgress?.('verification', `[retry-build] ${msg}`)
+      );
+
+      if (retryBuild.success) {
+        onProgress?.('verification', 'Build now passes after consensus-approved fix');
+        await logger.success('verification', 'build_fixed_by_consensus', 'Build fixed via consensus-approved plan', {
+          consensusScore: buildFixConsensus.finalScore,
+          autoFixed: true,
+        });
+      } else {
+        // Still failing after consensus-approved fix - mark in state so resume knows
+        onProgress?.(
+          'verification-error',
+          'BLOCKING: Build still failing after consensus-approved fix. Run /resume to retry.'
+        );
+
+        await updateState(projectDir, {
+          status: 'failed',
+          error: 'Build verification failed - build errors remain after consensus-approved fix',
+        });
+
+        return {
+          success: false,
+          state,
+          completedTasks,
+          failedTasks,
+          error: 'Build verification failed - project not complete',
+          buildStatus: 'failed',
+        };
+      }
     } else {
       onProgress?.('verification', `Build verification passed${buildResult.autoFixed ? ' (after auto-fix)' : ''}`);
       await logger.success('verification', 'build_passed', 'Build verification passed', {
@@ -790,10 +1109,12 @@ export async function runExecutionMode(
 
     // Run final test verification
     const hasTests = await testsExist(projectDir, state.language);
+    let finalTestStatus: 'passed' | 'failed' | 'skipped' | 'no-tests' = hasTests ? 'skipped' : 'no-tests';
     if (hasTests) {
       onProgress?.('verification', 'Running final test verification...');
       const testResult = await runTests(projectDir, state.language);
       if (!testResult.success) {
+        finalTestStatus = 'failed';
         onProgress?.(
           'verification-warning',
           `Final test verification failed: ${testResult.failed} test(s) failed`
@@ -805,6 +1126,7 @@ export async function runExecutionMode(
           failedTests: testResult.failedTests,
         });
       } else {
+        finalTestStatus = 'passed';
         onProgress?.(
           'verification',
           `All tests passed: ${testResult.passed}/${testResult.total}`
@@ -878,6 +1200,7 @@ export async function runExecutionMode(
 
     const comprehensiveReport = await runComprehensiveVerification(
       projectDir,
+      state.language,
       (msg) => onProgress?.('verification', msg)
     );
 
@@ -900,7 +1223,7 @@ export async function runExecutionMode(
         // Re-run verification after fixes
         if (fixed > 0) {
           onProgress?.('verification', 'Re-running verification after fixes...');
-          const reVerifyReport = await runComprehensiveVerification(projectDir);
+          const reVerifyReport = await runComprehensiveVerification(projectDir, state.language);
 
           if (reVerifyReport.failedChecks > 0) {
             onProgress?.(
@@ -981,6 +1304,8 @@ export async function runExecutionMode(
       state,
       completedTasks,
       failedTasks: 0,
+      buildStatus: 'passed',
+      testStatus: finalTestStatus,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -1025,15 +1350,18 @@ export async function resumeExecutionMode(
     `Current progress: ${progress.progressSummary}`
   );
 
-  // Check if actually complete
-  if (state.status === 'complete' || state.phase === 'complete') {
+  // Check if actually complete - only trust explicit completion (completeProject() sets both)
+  const projectExplicitlyCompleted = state.status === 'complete' && state.phase === 'complete';
+
+  if (projectExplicitlyCompleted) {
     if (verification.isComplete) {
-      onProgress?.('resume-complete', 'Project is genuinely complete');
+      onProgress?.('resume-complete', 'Project is genuinely complete (all tasks done, build verified)');
       return {
         success: true,
         state,
         completedTasks: progress.completedTasks,
         failedTasks: 0,
+        buildStatus: 'passed',
       };
     }
 
@@ -1054,6 +1382,22 @@ export async function resumeExecutionMode(
       'resume-reset',
       `Reset project status. Will continue with ${progress.pendingTasks + progress.failedTasks} remaining tasks`
     );
+  }
+
+  // All tasks done but project never explicitly completed - need to run build verification
+  if (verification.isComplete && !projectExplicitlyCompleted) {
+    onProgress?.(
+      'resume-verification',
+      'All tasks complete but final verification (build/tests) has not passed yet - re-running...'
+    );
+
+    // Reset error/failed status so execution mode proceeds to verification
+    if (state.status === 'failed' || state.status === 'paused') {
+      state = await updateState(projectDir, {
+        status: 'in-progress',
+        error: undefined,
+      });
+    }
   }
 
   // Reset failed tasks to pending so they can be retried

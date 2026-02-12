@@ -31,24 +31,52 @@ export interface AutoFixResult {
     description: string;
   }>;
   error?: string;
+  /** Number of error files that were not found on disk (ENOENT) */
+  missingFileCount: number;
+  /** Total number of unique files with errors */
+  totalErrorFiles: number;
+  /** True if the majority of error files don't exist - indicates missing files, not code bugs */
+  isStructuralIssue: boolean;
+  /** Paths of missing files (capped at 30) */
+  missingFiles: string[];
 }
 
 /**
- * Parse TypeScript compiler errors from output
+ * Parse TypeScript compiler errors from output.
+ * Supports two formats:
+ *   1. tsc direct: path(line,col): error TSxxxx: message
+ *   2. Bundler (Vite, webpack, Next.js): path:line:col - error TSxxxx: message
+ * Strips ANSI color codes and de-duplicates by file:line:col:code.
  */
 export function parseTypeScriptErrors(output: string): BuildError[] {
   const errors: BuildError[] = [];
-  const errorPattern = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.+)$/gm;
+  // Strip ANSI color/escape codes before parsing
+  const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
 
-  let match;
-  while ((match = errorPattern.exec(output)) !== null) {
-    errors.push({
-      file: match[1],
-      line: parseInt(match[2], 10),
-      column: parseInt(match[3], 10),
-      code: match[4],
-      message: match[5],
-    });
+  // Format 1: tsc direct output - path(line,col): error TSxxxx: message
+  const tscPattern = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.+)$/gm;
+
+  // Format 2: bundler output (Vite, webpack, etc.) - path:line:col - error TSxxxx: message
+  const bundlerPattern = /^(.+?):(\d+):(\d+)\s*-\s*error (TS\d+): (.+)$/gm;
+
+  // De-duplicate by file:line:col:code to avoid counting the same error twice
+  const seen = new Set<string>();
+
+  for (const pattern of [tscPattern, bundlerPattern]) {
+    let match;
+    while ((match = pattern.exec(clean)) !== null) {
+      const key = `${match[1].trim()}:${match[2]}:${match[3]}:${match[4]}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        errors.push({
+          file: match[1].trim(),
+          line: parseInt(match[2], 10),
+          column: parseInt(match[3], 10),
+          code: match[4],
+          message: match[5],
+        });
+      }
+    }
   }
 
   return errors;
@@ -157,6 +185,8 @@ export async function autoFixTypeScriptErrors(
   const fixes: Array<{ file: string; description: string }> = [];
   let attempts = 0;
   let currentOutput = buildOutput;
+  const missingFilesSet = new Set<string>();
+  const accessibleFilesSet = new Set<string>();
 
   while (attempts < maxAttempts) {
     attempts++;
@@ -165,6 +195,26 @@ export async function autoFixTypeScriptErrors(
     const errors = parseTypeScriptErrors(currentOutput);
 
     if (errors.length === 0) {
+      // First attempt with zero parsed errors and no prior fixes: the build failed
+      // but we can't parse the error format. This is NOT success.
+      const noParsedOnFirstAttempt = attempts === 1 && fixes.length === 0;
+      if (noParsedOnFirstAttempt) {
+        onProgress?.('No parseable TypeScript errors in build output (may be bundler/non-TS errors)');
+        return {
+          success: false,
+          fixedErrors: 0,
+          remainingErrors: 0,
+          attempts,
+          fixes,
+          missingFileCount: missingFilesSet.size,
+          totalErrorFiles: 0,
+          isStructuralIssue: false,
+          missingFiles: [],
+          error: 'Build failed but no parseable TypeScript errors found in output',
+        };
+      }
+
+      // Subsequent attempt after fixes: tsc --noEmit found no errors, genuinely fixed
       onProgress?.('No TypeScript errors found');
       return {
         success: true,
@@ -172,6 +222,10 @@ export async function autoFixTypeScriptErrors(
         remainingErrors: 0,
         attempts,
         fixes,
+        missingFileCount: missingFilesSet.size,
+        totalErrorFiles: missingFilesSet.size + accessibleFilesSet.size,
+        isStructuralIssue: false,
+        missingFiles: [],
       };
     }
 
@@ -188,6 +242,7 @@ export async function autoFixTypeScriptErrors(
       try {
         // Read current file content
         const fileContent = await fs.readFile(absolutePath, 'utf-8');
+        accessibleFilesSet.add(absolutePath);
 
         onProgress?.(`Fixing ${fileErrors.length} error(s) in ${path.basename(filePath)}...`);
 
@@ -222,12 +277,20 @@ export async function autoFixTypeScriptErrors(
           onProgress?.(`Failed to get fix for ${path.basename(filePath)}: ${result.error}`);
         }
       } catch (err) {
+        // Track ENOENT separately - these indicate missing files, not code bugs
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          missingFilesSet.add(absolutePath);
+        }
         onProgress?.(`Error fixing ${filePath}: ${err instanceof Error ? err.message : 'Unknown error'}`);
       }
     }
 
     if (fixedInThisAttempt === 0) {
-      onProgress?.('No fixes were applied in this attempt');
+      if (missingFilesSet.size > 0) {
+        onProgress?.(`No fixes applied: ${missingFilesSet.size}/${errorsByFile.size} error files not found on disk (ENOENT)`);
+      } else {
+        onProgress?.('No fixes were applied in this attempt');
+      }
       break;
     }
 
@@ -251,6 +314,15 @@ export async function autoFixTypeScriptErrors(
 
   // Final error count
   const remainingErrors = parseTypeScriptErrors(currentOutput);
+  const missingFileCount = missingFilesSet.size;
+  const totalErrorFiles = missingFilesSet.size + accessibleFilesSet.size;
+  const missingFiles = Array.from(missingFilesSet).slice(0, 30);
+
+  // Structural issue heuristic: most error files don't exist on disk
+  const isStructuralIssue = totalErrorFiles > 0 && (
+    (missingFileCount / totalErrorFiles >= 0.5) ||
+    (missingFileCount >= 25)
+  );
 
   return {
     success: remainingErrors.length === 0,
@@ -261,6 +333,10 @@ export async function autoFixTypeScriptErrors(
     error: remainingErrors.length > 0
       ? `${remainingErrors.length} error(s) remain after ${attempts} fix attempt(s)`
       : undefined,
+    missingFileCount,
+    totalErrorFiles,
+    isStructuralIssue,
+    missingFiles,
   };
 }
 
@@ -272,12 +348,22 @@ export async function buildWithAutoFix(
   language: string,
   maxAttempts: number = 3,
   onProgress?: (message: string) => void
-): Promise<{ success: boolean; output: string; autoFixed: boolean }> {
+): Promise<{
+  success: boolean;
+  output: string;
+  autoFixed: boolean;
+  structuralIssue?: boolean;
+  missingFileCount?: number;
+  totalErrorFiles?: number;
+  missingFiles?: string[];
+}> {
   const { exec } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const execAsync = promisify(exec);
 
-  // Determine build command based on language
+  // Determine build command and whether TypeScript auto-fix applies
+  // Fullstack, website, and 'all' projects also use TypeScript
+  const isTypeScriptBased = ['typescript', 'javascript', 'fullstack', 'website', 'all'].includes(language);
   let buildCommand: string;
   if (language === 'typescript' || language === 'javascript') {
     // Check for package.json build script
@@ -313,9 +399,14 @@ export async function buildWithAutoFix(
 
     onProgress?.('Build failed, attempting auto-fix...');
 
-    // Try auto-fix for TypeScript errors
-    if (language === 'typescript' || language === 'javascript') {
+    // Try auto-fix for TypeScript-based projects (includes fullstack, website, all)
+    if (isTypeScriptBased) {
       const fixResult = await autoFixTypeScriptErrors(projectDir, output, maxAttempts, onProgress);
+
+      // Log structural issue if detected
+      if (fixResult.isStructuralIssue) {
+        onProgress?.(`STRUCTURAL ISSUE: ${fixResult.missingFileCount}/${fixResult.totalErrorFiles} error files not found on disk. Likely missing files, not code bugs.`);
+      }
 
       if (fixResult.success) {
         // Retry build after fixes
@@ -330,9 +421,23 @@ export async function buildWithAutoFix(
           const retryOutput = retryErr && typeof retryErr === 'object' && 'stdout' in retryErr
             ? (retryErr as { stdout: string; stderr: string }).stdout + (retryErr as { stdout: string; stderr: string }).stderr
             : String(retryErr);
-          return { success: false, output: retryOutput, autoFixed: true };
+          return {
+            success: false, output: retryOutput, autoFixed: true,
+            structuralIssue: fixResult.isStructuralIssue,
+            missingFileCount: fixResult.missingFileCount,
+            totalErrorFiles: fixResult.totalErrorFiles,
+            missingFiles: fixResult.missingFiles,
+          };
         }
       }
+
+      return {
+        success: false, output, autoFixed: false,
+        structuralIssue: fixResult.isStructuralIssue,
+        missingFileCount: fixResult.missingFileCount,
+        totalErrorFiles: fixResult.totalErrorFiles,
+        missingFiles: fixResult.missingFiles,
+      };
     }
 
     return { success: false, output, autoFixed: false };

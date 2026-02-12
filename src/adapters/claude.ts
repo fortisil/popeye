@@ -657,6 +657,12 @@ export async function executePrompt(
         response: result.response,
         toolCalls: result.toolCalls,
         error: `Rate limit exceeded after ${attempt} retries. ${result.rateLimitInfo.message || ''}`,
+        rateLimitPaused: true,
+        rateLimitInfo: {
+          resetTime: result.rateLimitInfo.resetTime,
+          waitTimeMs: undefined,
+          message: result.rateLimitInfo.message || `Rate limit exceeded after ${attempt} retries`,
+        },
       };
     }
 
