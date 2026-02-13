@@ -635,6 +635,108 @@ npm start                # Run as Node.js server
 }
 
 /**
+ * Result of README validation
+ */
+interface ReadmeValidationResult {
+  valid: boolean;
+  missingCritical: string[];
+  missingRecommended: string[];
+}
+
+/**
+ * Validate that the generated README contains required sections for the project type.
+ *
+ * Critical sections block completion; recommended sections produce warnings.
+ *
+ * @param projectDir - Project root directory
+ * @param language - Project language type
+ * @returns Validation result with lists of missing sections
+ */
+async function validateReadme(
+  projectDir: string,
+  language: OutputLanguage
+): Promise<ReadmeValidationResult> {
+  const missingCritical: string[] = [];
+  const missingRecommended: string[] = [];
+
+  let content: string;
+  try {
+    content = await fs.readFile(path.join(projectDir, 'README.md'), 'utf-8');
+  } catch {
+    return { valid: false, missingCritical: ['README.md file not found'], missingRecommended: [] };
+  }
+
+  const contentLower = content.toLowerCase();
+
+  // Sections required for ALL project types
+  const universalRequired: Array<{ label: string; patterns: string[] }> = [
+    { label: 'Installation', patterns: ['## installation'] },
+    { label: 'Running the Application', patterns: ['## running', 'development mode'] },
+    { label: 'Project Structure', patterns: ['## project structure'] },
+    { label: 'Environment Setup', patterns: ['## environment', '.env'] },
+  ];
+
+  for (const section of universalRequired) {
+    if (!section.patterns.some(p => contentLower.includes(p))) {
+      missingCritical.push(section.label);
+    }
+  }
+
+  // Check for build/test commands
+  if (!contentLower.includes('npm run build') && !contentLower.includes('pip install') && !contentLower.includes('py_compile')) {
+    missingCritical.push('Build command');
+  }
+  if (!contentLower.includes('npm test') && !contentLower.includes('pytest')) {
+    missingRecommended.push('Test command');
+  }
+
+  // Workspace-specific checks (fullstack, all)
+  if (isWorkspace(language)) {
+    // Must have per-app sections
+    if (!contentLower.includes('frontend') || !contentLower.includes('backend')) {
+      missingCritical.push('Per-app instructions (frontend/backend)');
+    }
+
+    // Must have deployment section
+    if (!contentLower.includes('## deployment') && !contentLower.includes('### deploy')) {
+      missingCritical.push('Deployment section');
+    }
+
+    // Must mention docker
+    if (!contentLower.includes('docker')) {
+      missingCritical.push('Docker instructions');
+    }
+
+    // 'all' projects must mention website
+    if (language === 'all') {
+      if (!contentLower.includes('website') && !contentLower.includes('next.js')) {
+        missingCritical.push('Website app instructions');
+      }
+    }
+  }
+
+  // Website-specific
+  if (language === 'website') {
+    if (!contentLower.includes('next.js') && !contentLower.includes('next')) {
+      missingRecommended.push('Next.js reference');
+    }
+  }
+
+  // Python-specific
+  if (language === 'python') {
+    if (!contentLower.includes('pip install') && !contentLower.includes('requirements.txt')) {
+      missingCritical.push('Python dependency installation');
+    }
+  }
+
+  return {
+    valid: missingCritical.length === 0,
+    missingCritical,
+    missingRecommended,
+  };
+}
+
+/**
  * Extract a brief description from the specification
  *
  * @param spec - Full specification text
@@ -1621,6 +1723,39 @@ ${buildResult.structuralIssue ? buildErrors.slice(0, 1500) : buildErrors.slice(0
       await logger.warn('completion', 'readme_failed', 'Failed to generate README', {
         error: readmeResult.error,
       });
+    }
+
+    // ============================================
+    // VALIDATE README COMPLETENESS
+    // ============================================
+    onProgress?.('readme', 'Validating README completeness...');
+    let readmeValidation = await validateReadme(projectDir, state.language);
+
+    if (!readmeValidation.valid) {
+      onProgress?.('readme-warning', `README missing critical sections: ${readmeValidation.missingCritical.join(', ')}`);
+
+      // Re-generate and retry once
+      onProgress?.('readme', 'Re-generating README to include missing sections...');
+      await generateProjectReadme(projectDir, state);
+      readmeValidation = await validateReadme(projectDir, state.language);
+
+      if (!readmeValidation.valid) {
+        onProgress?.('readme-warning', `README still missing after re-generation: ${readmeValidation.missingCritical.join(', ')}`);
+        await logger.warn('completion', 'readme_incomplete', 'README is missing critical sections', {
+          missing: readmeValidation.missingCritical,
+        });
+      } else {
+        onProgress?.('readme', 'README validated successfully after re-generation');
+      }
+    } else {
+      onProgress?.('readme', 'README validated successfully');
+    }
+
+    // Log recommended (non-blocking) warnings
+    if (readmeValidation.missingRecommended.length > 0) {
+      for (const rec of readmeValidation.missingRecommended) {
+        onProgress?.('readme-info', `README recommendation: add ${rec}`);
+      }
     }
 
     // All milestones complete
