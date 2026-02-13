@@ -7,27 +7,47 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ProjectSpec } from '../types/project.js';
 import {
+  generateWebsiteLayout,
+  generateWebsiteGlobalsCss,
+  generateWebsiteLandingPage,
+  generateWebsitePricingPage,
+  generateWebsiteReadme,
+  generateWebsiteSpec,
+  generateWebsiteTest,
+  generateWebsiteDocsPage,
+  generateWebsiteBlogPage,
+} from './templates/website.js';
+import {
   generateWebsitePackageJson,
   generateNextConfig,
   generateWebsiteTsconfig,
   generateWebsiteTailwindConfig,
   generateWebsitePostcssConfig,
-  generateWebsiteLayout,
-  generateWebsiteGlobalsCss,
-  generateWebsiteLandingPage,
-  generateWebsitePricingPage,
-  generateWebsiteSitemap,
-  generateWebsiteRobots,
   generateWebsiteDockerfile,
-  generateWebsiteReadme,
-  generateWebsiteSpec,
   generateWebsiteVitestConfig,
   generateWebsiteVitestSetup,
-  generateWebsiteTest,
-  generateWebsiteDocsPage,
-  generateWebsiteBlogPage,
   generateWebsiteNextEnv,
-} from './templates/website.js';
+} from './templates/website-config.js';
+import {
+  generateWebsiteHeader,
+  generateWebsiteFooter,
+  generateWebsiteNavigation,
+} from './templates/website-components.js';
+import {
+  generateJsonLdComponent,
+  generateEnhancedSitemap,
+  generateEnhancedRobots,
+  generate404Page,
+  generate500Page,
+  generateWebManifest,
+  generateMetaHelper,
+} from './templates/website-seo.js';
+import {
+  generateLeadCaptureRoute,
+  generateContactForm,
+  generateLeadCaptureEnvExample,
+} from './templates/website-conversion.js';
+import type { WebsiteContentContext } from './website-context.js';
 
 /**
  * Project generation result
@@ -53,6 +73,8 @@ export interface WebsiteGeneratorOptions {
   skipDocker?: boolean;
   /** Skip README (fullstack has root README) */
   skipReadme?: boolean;
+  /** Content context from user docs for populating templates */
+  contentContext?: WebsiteContentContext;
 }
 
 /**
@@ -88,6 +110,7 @@ export async function generateWebsiteProject(
     workspaceMode = false,
     skipDocker = false,
     skipReadme = false,
+    contentContext,
   } = options;
 
   const projectName = spec.name || 'my-project';
@@ -103,11 +126,13 @@ export async function generateWebsiteProject(
     await ensureDir(path.join(projectDir, 'src', 'app', 'pricing'));
     await ensureDir(path.join(projectDir, 'src', 'app', 'docs'));
     await ensureDir(path.join(projectDir, 'src', 'app', 'blog'));
+    await ensureDir(path.join(projectDir, 'src', 'app', 'api', 'lead'));
     await ensureDir(path.join(projectDir, 'src', 'components'));
     await ensureDir(path.join(projectDir, 'src', 'lib'));
     await ensureDir(path.join(projectDir, 'content', 'blog'));
     await ensureDir(path.join(projectDir, 'content', 'docs'));
     await ensureDir(path.join(projectDir, 'public'));
+    await ensureDir(path.join(projectDir, 'public', 'brand'));
     await ensureDir(path.join(projectDir, 'tests'));
 
     // Only create .popeye dir in standalone mode
@@ -150,19 +175,19 @@ export async function generateWebsiteProject(
       // App Router files
       {
         path: path.join(projectDir, 'src', 'app', 'layout.tsx'),
-        content: generateWebsiteLayout(projectName),
+        content: generateWebsiteLayout(projectName, contentContext),
       },
       {
         path: path.join(projectDir, 'src', 'app', 'globals.css'),
-        content: generateWebsiteGlobalsCss(),
+        content: generateWebsiteGlobalsCss(contentContext),
       },
       {
         path: path.join(projectDir, 'src', 'app', 'page.tsx'),
-        content: generateWebsiteLandingPage(projectName),
+        content: generateWebsiteLandingPage(projectName, contentContext),
       },
       {
         path: path.join(projectDir, 'src', 'app', 'pricing', 'page.tsx'),
-        content: generateWebsitePricingPage(projectName),
+        content: generateWebsitePricingPage(projectName, contentContext),
       },
       {
         path: path.join(projectDir, 'src', 'app', 'docs', 'page.tsx'),
@@ -173,14 +198,64 @@ export async function generateWebsiteProject(
         content: generateWebsiteBlogPage(),
       },
 
+      // Shared components
+      {
+        path: path.join(projectDir, 'src', 'components', 'Header.tsx'),
+        content: generateWebsiteHeader(projectName, contentContext, contentContext?.strategy),
+      },
+      {
+        path: path.join(projectDir, 'src', 'components', 'Footer.tsx'),
+        content: generateWebsiteFooter(projectName, contentContext, contentContext?.strategy),
+      },
+      {
+        path: path.join(projectDir, 'src', 'components', 'JsonLd.tsx'),
+        content: generateJsonLdComponent(),
+      },
+      {
+        path: path.join(projectDir, 'src', 'components', 'ContactForm.tsx'),
+        content: generateContactForm(contentContext?.strategy),
+      },
+      {
+        path: path.join(projectDir, 'src', 'lib', 'navigation.ts'),
+        content: generateWebsiteNavigation(contentContext?.strategy),
+      },
+      {
+        path: path.join(projectDir, 'src', 'lib', 'metadata.ts'),
+        content: generateMetaHelper(projectName, contentContext?.strategy),
+      },
+
+      // Lead capture API route
+      {
+        path: path.join(projectDir, 'src', 'app', 'api', 'lead', 'route.ts'),
+        content: generateLeadCaptureRoute(
+          contentContext?.strategy?.conversionStrategy.leadCapture || 'webhook'
+        ),
+      },
+
       // SEO files
       {
         path: path.join(projectDir, 'src', 'app', 'sitemap.ts'),
-        content: generateWebsiteSitemap(projectName),
+        content: generateEnhancedSitemap(projectName, contentContext?.strategy),
       },
       {
         path: path.join(projectDir, 'src', 'app', 'robots.ts'),
-        content: generateWebsiteRobots(projectName),
+        content: generateEnhancedRobots(projectName),
+      },
+
+      // Error pages
+      {
+        path: path.join(projectDir, 'src', 'app', 'not-found.tsx'),
+        content: generate404Page(projectName, contentContext),
+      },
+      {
+        path: path.join(projectDir, 'src', 'app', 'error.tsx'),
+        content: generate500Page(projectName),
+      },
+
+      // PWA manifest
+      {
+        path: path.join(projectDir, 'public', 'manifest.webmanifest'),
+        content: generateWebManifest(projectName, contentContext),
       },
 
       // Test files
@@ -218,7 +293,10 @@ export async function generateWebsiteProject(
       // Environment
       {
         path: path.join(projectDir, '.env.example'),
-        content: 'NEXT_PUBLIC_SITE_URL=http://localhost:3001\nNEXT_PUBLIC_APP_URL=http://localhost:3000\n',
+        content: 'NEXT_PUBLIC_SITE_URL=http://localhost:3001\nNEXT_PUBLIC_APP_URL=http://localhost:3000\n' +
+          generateLeadCaptureEnvExample(
+            contentContext?.strategy?.conversionStrategy.leadCapture || 'webhook'
+          ),
       },
       {
         path: path.join(projectDir, '.gitignore'),
@@ -231,8 +309,20 @@ export async function generateWebsiteProject(
     if (!workspaceMode) {
       files.push({
         path: path.join(projectDir, '.popeye', 'website-spec.json'),
-        content: generateWebsiteSpec(projectName),
+        content: generateWebsiteSpec(projectName, contentContext),
       });
+    }
+
+    // Copy logo to public/ if brand context has one
+    if (contentContext?.brand?.logoPath) {
+      try {
+        const logoExt = path.extname(contentContext.brand.logoPath);
+        const destPath = path.join(projectDir, 'public', `logo${logoExt}`);
+        await fs.copyFile(contentContext.brand.logoPath, destPath);
+        filesCreated.push(destPath);
+      } catch {
+        // Non-blocking: logo copy failure should not stop generation
+      }
     }
 
     // Add README if not skipped

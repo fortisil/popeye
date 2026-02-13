@@ -192,6 +192,15 @@ export interface ProjectState {
   error?: string;
   createdAt: string;
   updatedAt: string;
+  /** Raw user documentation discovered from CWD */
+  userDocs?: string;
+  /** Brand context discovered from CWD */
+  brandContext?: {
+    logoPath?: string;
+    primaryColor?: string;
+  };
+  /** Path to website strategy JSON file (relative to .popeye/) */
+  websiteStrategy?: string;
 }
 
 /**
@@ -229,6 +238,12 @@ export const ProjectStateSchema = z.object({
   error: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  userDocs: z.string().optional(),
+  brandContext: z.object({
+    logoPath: z.string().optional(),
+    primaryColor: z.string().optional(),
+  }).optional(),
+  websiteStrategy: z.string().optional(),
 });
 
 /**

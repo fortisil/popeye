@@ -39,6 +39,7 @@ export type WorkflowStage =
   | 'verification'
   | 'ui-design'
   | 'ui-setup'
+  | 'website-strategy'
   | 'completion';
 
 /**

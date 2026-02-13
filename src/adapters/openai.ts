@@ -43,7 +43,7 @@ export async function requestConsensus(
   const client = await createClient();
 
   // Build the consensus review prompt (matches spec section 11.1)
-  const prompt = buildConsensusPrompt(plan, context);
+  const prompt = buildConsensusPrompt(plan, context, config.reviewerPersona);
 
   try {
     const completion = await client.chat.completions.create({
@@ -68,9 +68,14 @@ export async function requestConsensus(
 /**
  * Build the consensus review prompt
  * Follows spec section 11.1 format
+ *
+ * @param plan - The plan to review
+ * @param context - Project context
+ * @param persona - Optional custom reviewer persona (defaults to senior software architect)
  */
-function buildConsensusPrompt(plan: string, context: string): string {
-  return `You are a senior software architect reviewing a development plan.
+function buildConsensusPrompt(plan: string, context: string, persona?: string): string {
+  const reviewerRole = persona || 'a senior software architect';
+  return `You are ${reviewerRole} reviewing a development plan.
 Analyze the following plan for completeness, correctness, and feasibility.
 
 PROJECT CONTEXT:
@@ -256,17 +261,28 @@ export async function listAvailableModels(): Promise<string[]> {
  */
 export async function expandIdea(
   idea: string,
-  language: OutputLanguage
+  language: OutputLanguage,
+  userDocs?: string
 ): Promise<string> {
   const client = await createClient();
 
+  const isWebsiteProject = language === 'website' || language === 'all';
+
   const languageDesc = language === 'fullstack'
     ? 'React (TypeScript) frontend with FastAPI (Python) backend'
+    : language === 'website'
+    ? 'Next.js (TypeScript) marketing website'
+    : language === 'all'
+    ? 'React frontend + FastAPI backend + Next.js marketing website'
     : language === 'python'
     ? 'Python'
     : 'TypeScript';
 
-  const prompt = `You are a senior software architect. A user wants to build a project with the following idea:
+  const personaRole = isWebsiteProject
+    ? 'a Senior Product Marketing Strategist and Fullstack Web Architect'
+    : 'a senior software architect';
+
+  let prompt = `You are ${personaRole}. A user wants to build a project with the following idea:
 
 "${idea}"
 
@@ -285,9 +301,25 @@ Expand this into a complete software specification including:
 5. **API Specification** (if applicable): Key endpoints and their purposes
 6. **Data Models**: Key entities and their relationships
 7. **Non-Functional Requirements**: Performance, security, scalability considerations
-8. **Deployment**: Docker configuration and deployment approach
+8. **Deployment**: Docker configuration and deployment approach`;
+
+  // Add website-specific sections for website projects
+  if (isWebsiteProject) {
+    prompt += `
+9. **Ideal Customer Profile (ICP)**: Primary persona, pain points, goals, objections
+10. **SEO Strategy**: Primary keywords, long-tail keywords, content themes
+11. **Conversion Funnel**: Primary CTA, secondary CTA, trust signals, lead capture mechanism
+12. **Site Map**: All pages with their purpose and conversion goal
+13. **Competitive Positioning**: Category, key differentiators vs alternatives`;
+  }
+
+  prompt += `
 
 Be specific and actionable. The specification should be detailed enough that a developer could implement it without further clarification.`;
+
+  if (userDocs) {
+    prompt += `\n\nThe user has provided the following project documentation that describes their product:\n\n${userDocs.slice(0, 4000)}\n\nUse this documentation to create an accurate, detailed specification that reflects the actual product described. Do not invent features or pricing not mentioned in the docs.`;
+  }
 
   const completion = await client.chat.completions.create({
     model: 'gpt-4o',

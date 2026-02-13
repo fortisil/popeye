@@ -79,6 +79,7 @@ async function requestReviewerConsensus(
       model: config.geminiModel,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
+      reviewerPersona: config.reviewerPersona,
     });
   }
   if (reviewer === 'grok') {
@@ -86,6 +87,7 @@ async function requestReviewerConsensus(
       model: config.grokModel,
       temperature: config.temperature,
       maxTokens: config.maxTokens,
+      reviewerPersona: config.reviewerPersona,
     });
   }
   return requestOpenAIConsensus(plan, context, config);

@@ -47,16 +47,17 @@ export async function createClient(): Promise<OpenAI> {
 export async function requestConsensus(
   plan: string,
   context: string,
-  config: { model?: string; temperature?: number; maxTokens?: number } = {}
+  config: { model?: string; temperature?: number; maxTokens?: number; reviewerPersona?: string } = {}
 ): Promise<ConsensusResult> {
   const {
     model = DEFAULT_GROK_CONFIG.model,
     temperature = DEFAULT_GROK_CONFIG.temperature,
     maxTokens = DEFAULT_GROK_CONFIG.maxTokens,
+    reviewerPersona,
   } = config;
 
   const client = await createClient();
-  const prompt = buildConsensusPrompt(plan, context);
+  const prompt = buildConsensusPrompt(plan, context, reviewerPersona);
 
   try {
     const completion = await client.chat.completions.create({
@@ -116,9 +117,14 @@ export async function requestArbitration(
 
 /**
  * Build the consensus review prompt
+ *
+ * @param plan - The plan to review
+ * @param context - Project context
+ * @param persona - Optional custom reviewer persona
  */
-function buildConsensusPrompt(plan: string, context: string): string {
-  return `You are a senior software architect reviewing a development plan.
+function buildConsensusPrompt(plan: string, context: string, persona?: string): string {
+  const reviewerRole = persona || 'a senior software architect';
+  return `You are ${reviewerRole} reviewing a development plan.
 Analyze the following plan for completeness, correctness, and feasibility.
 
 PROJECT CONTEXT:

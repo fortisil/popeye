@@ -17,11 +17,27 @@ import {
   setPhase,
   storePlan,
   storeSpecification,
+  storeUserDocs,
+  storeBrandContext,
+  storeWebsiteStrategyPath,
   addMilestones,
 } from '../state/index.js';
+import {
+  discoverProjectDocs,
+  readProjectDocs,
+  findBrandAssets,
+  resolveBrandAssets,
+} from '../generators/website-context.js';
 import { iterateUntilConsensus, type ConsensusProcessResult } from './consensus.js';
 import { getWorkflowLogger } from './workflow-logger.js';
 import { designUI, saveUISpecification } from './ui-designer.js';
+import {
+  generateWebsiteStrategy,
+  formatStrategyForPlanContext,
+  storeWebsiteStrategy,
+  loadWebsiteStrategy,
+} from './website-strategy.js';
+import type { WebsiteStrategyDocument } from '../types/website-strategy.js';
 
 /**
  * Options for plan mode
@@ -49,16 +65,18 @@ export interface PlanModeResult {
  * @param idea - The brief project idea
  * @param language - Target programming language
  * @param onProgress - Progress callback
+ * @param userDocs - Optional user documentation for context
  * @returns Expanded specification
  */
 export async function expandIdea(
   idea: string,
   language: OutputLanguage,
-  onProgress?: (message: string) => void
+  onProgress?: (message: string) => void,
+  userDocs?: string
 ): Promise<string> {
   onProgress?.('Expanding idea into specification...');
 
-  const specification = await openaiExpandIdea(idea, language);
+  const specification = await openaiExpandIdea(idea, language, userDocs);
 
   onProgress?.('Specification created');
   return specification;
@@ -890,6 +908,27 @@ export async function runPlanMode(
       });
     }
 
+    // Discover user documentation from the CWD (parent of project dir)
+    let userDocs = state.userDocs || '';
+    if (!userDocs) {
+      const parentDir = path.dirname(projectDir);
+      const docPaths = await discoverProjectDocs(parentDir);
+      if (docPaths.length > 0) {
+        userDocs = await readProjectDocs(docPaths);
+        onProgress?.('doc-discovery', `Found ${docPaths.length} project doc(s)`);
+        state = await storeUserDocs(projectDir, userDocs);
+        await logger.info('init', 'docs_found', `Found ${docPaths.length} project docs`, {
+          docCount: docPaths.length,
+          docPaths: docPaths.map((p) => path.basename(p)),
+        });
+      }
+      const brandAssets = await findBrandAssets(parentDir);
+      if (brandAssets.logoPath) {
+        state = await storeBrandContext(projectDir, { logoPath: brandAssets.logoPath });
+        onProgress?.('doc-discovery', `Found brand logo: ${path.basename(brandAssets.logoPath)}`);
+      }
+    }
+
     // Expand idea if we don't have a specification
     if (!state.specification) {
       onProgress?.('expand-idea', 'Expanding idea into specification...');
@@ -898,7 +937,8 @@ export async function runPlanMode(
       const specification = await expandIdea(
         spec.idea,
         spec.language,
-        (msg) => onProgress?.('expand-idea', msg)
+        (msg) => onProgress?.('expand-idea', msg),
+        userDocs || undefined
       );
 
       state = await storeSpecification(projectDir, specification);
@@ -928,6 +968,61 @@ export async function runPlanMode(
       });
     }
 
+    // Generate website strategy for website projects (after spec, before plan)
+    const isWebsiteProject = spec.language === 'website' || spec.language === 'all';
+    let websiteStrategy: WebsiteStrategyDocument | undefined;
+
+    if (isWebsiteProject && state.specification) {
+      try {
+        onProgress?.('get-context', 'Generating website marketing strategy...');
+        await logger.stageStart('website-strategy', 'Generating website marketing strategy');
+
+        const parentDir = path.dirname(projectDir);
+        const brandAssets = await resolveBrandAssets(parentDir, state.brandContext);
+
+        const strategyInput = {
+          productContext: (userDocs || '') + '\n\n' + (state.specification || ''),
+          projectName: spec.name || state.name,
+          brandAssets,
+        };
+
+        // Check for cached strategy
+        const cached = await loadWebsiteStrategy(projectDir);
+        if (cached) {
+          websiteStrategy = cached.strategy;
+          onProgress?.('get-context', `Loaded cached strategy: ${cached.strategy.siteArchitecture.pages.length} pages`);
+        } else {
+          const result = await generateWebsiteStrategy(
+            strategyInput,
+            (msg) => onProgress?.('get-context', msg)
+          );
+          websiteStrategy = result.strategy;
+          await storeWebsiteStrategy(projectDir, result.strategy, result.metadata);
+          state = await storeWebsiteStrategyPath(projectDir, '.popeye/website-strategy.json');
+
+          onProgress?.(
+            'get-context',
+            `Strategy: ${result.strategy.siteArchitecture.pages.length} pages, ` +
+            `${result.strategy.seoStrategy.primaryKeywords.length} keywords`
+          );
+        }
+
+        await logger.stageComplete('website-strategy', 'Website strategy generated', {
+          pageCount: websiteStrategy.siteArchitecture.pages.length,
+          keywordCount: websiteStrategy.seoStrategy.primaryKeywords.length,
+        });
+      } catch (strategyError) {
+        // Non-blocking: strategy generation failure should not stop the workflow
+        onProgress?.(
+          'get-context',
+          `Website strategy skipped: ${strategyError instanceof Error ? strategyError.message : 'Unknown error'}`
+        );
+        await logger.warn('website-strategy', 'strategy_skipped', 'Website strategy was skipped', {
+          error: strategyError instanceof Error ? strategyError.message : 'Unknown error',
+        });
+      }
+    }
+
     // Get project context
     onProgress?.('get-context', 'Gathering project context...');
     let context = await getProjectContext(
@@ -939,6 +1034,12 @@ export async function runPlanMode(
     if (additionalContext) {
       onProgress?.('get-context', 'Incorporating additional guidance...');
       context = `${context}\n\nADDITIONAL GUIDANCE FROM USER:\n${additionalContext}`;
+    }
+
+    // Inject website strategy as a separate context block (not appended to specification)
+    if (websiteStrategy) {
+      const strategyContext = formatStrategyForPlanContext(websiteStrategy);
+      context = `${context}\n\n## WEBSITE STRATEGY (authoritative reference)\n${strategyContext}`;
     }
 
     // Create initial plan if we don't have one
@@ -986,12 +1087,22 @@ export async function runPlanMode(
     onProgress?.('consensus', 'Starting consensus review...');
     await logger.stageStart('consensus', 'Starting consensus review process');
 
+    // Set marketing persona for website project reviews
+    const resolvedConsensusConfig = { ...consensusConfig };
+    if (isWebsiteProject && !resolvedConsensusConfig.reviewerPersona) {
+      resolvedConsensusConfig.reviewerPersona =
+        'a Senior Product Marketing Strategist, SEO expert, and Fullstack Web Architect. ' +
+        'Evaluate for: conversion optimization, messaging clarity, SEO best practices ' +
+        '(JSON-LD, heading hierarchy, meta tags), Lighthouse 95+ performance, WCAG 2.1 AA accessibility. ' +
+        'Reject generic template structures. Every section must connect to real product capabilities.';
+    }
+
     const consensusResult = await iterateUntilConsensus(
       state.plan!,
       context,
       {
         projectDir,
-        config: consensusConfig,
+        config: resolvedConsensusConfig,
         isFullstack: isWorkspace(spec.language),
         language: spec.language,
         onIteration: (iteration, result) => {

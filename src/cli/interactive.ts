@@ -843,6 +843,7 @@ function showHelp(): void {
     ['/upgrade [target]', 'Upgrade project type (e.g., fullstack -> all)'],
     ['/new <idea>', 'Force start a new project (skips existing check)'],
     ['/resume', 'Resume interrupted project'],
+    ['/overview [fix]', 'Project review with analysis; fix to auto-discover docs'],
     ['/clear', 'Clear screen'],
     ['/exit', 'Exit Popeye'],
   ];
@@ -997,6 +998,10 @@ async function handleInput(input: string, state: SessionState): Promise<boolean>
         await handleUpgrade(state, args);
         break;
 
+      case '/overview':
+        await handleOverview(state, args);
+        break;
+
       case '/new':
         // Force start a new project even if existing projects found
         if (args.length === 0) {
@@ -1048,6 +1053,48 @@ async function handleStatus(state: SessionState): Promise<void> {
 
   const summary = await getWorkflowSummary(state.projectDir);
   console.log(summary);
+}
+
+/**
+ * Handle /overview command - full project plan and milestone review
+ */
+async function handleOverview(state: SessionState, args: string[] = []): Promise<void> {
+  if (!state.projectDir) {
+    printInfo('No active project. Start or resume a project first.');
+    return;
+  }
+
+  const subcommand = args[0]?.toLowerCase();
+
+  try {
+    if (subcommand === 'fix') {
+      // Run fix mode: re-discover docs, find brand assets, update website content
+      const { fixOverviewIssues, generateOverview, formatOverview } = await import('../workflow/overview.js');
+
+      printInfo('Running overview fix...');
+      const fixResult = await fixOverviewIssues(state.projectDir, (msg) => {
+        printInfo(msg);
+      });
+
+      // Show fix results
+      console.log('');
+      for (const msg of fixResult.messages) {
+        printInfo(msg);
+      }
+      console.log('');
+
+      // Show updated overview after fix
+      const overview = await generateOverview(state.projectDir);
+      console.log(formatOverview(overview));
+    } else {
+      // Display-only mode: show overview with analysis
+      const { generateOverview, formatOverview } = await import('../workflow/overview.js');
+      const overview = await generateOverview(state.projectDir);
+      console.log(formatOverview(overview));
+    }
+  } catch (error) {
+    printInfo(`Could not generate overview: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 /**

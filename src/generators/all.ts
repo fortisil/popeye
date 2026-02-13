@@ -9,6 +9,7 @@ import type { ProjectSpec, WorkspaceConfig } from '../types/project.js';
 import type { GenerationResult } from './python.js';
 import { generateFullstackProject } from './fullstack.js';
 import { generateWebsiteProject } from './website.js';
+import type { WebsiteContentContext } from './website-context.js';
 
 /**
  * Options for all project generation
@@ -17,6 +18,8 @@ export interface AllGeneratorOptions {
   skipWebsite?: boolean;
   skipSharedPackages?: boolean;
   includeExamples?: boolean;
+  /** Content context from user docs for populating website templates */
+  contentContext?: WebsiteContentContext;
 }
 
 /**
@@ -692,7 +695,8 @@ CardContent.displayName = 'CardContent';
  */
 export async function generateAllProject(
   spec: ProjectSpec,
-  outputDir: string
+  outputDir: string,
+  options: AllGeneratorOptions = {}
 ): Promise<GenerationResult> {
   const projectName = spec.name || 'my-project';
   const projectDir = path.join(outputDir, projectName);
@@ -720,6 +724,7 @@ export async function generateAllProject(
       workspaceMode: true,
       skipDocker: false, // Website needs its own Dockerfile
       skipReadme: false,
+      contentContext: options.contentContext,
     });
     if (!websiteResult.success) {
       return {

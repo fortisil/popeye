@@ -89,6 +89,8 @@ export interface ConsensusConfig {
   useOptimizedConsensus?: boolean;
   /** Additional reviewers beyond primary (for parallel reviews) */
   additionalReviewers?: AIProvider[];
+  /** Custom reviewer persona for domain-specific reviews (e.g., marketing strategist for website projects) */
+  reviewerPersona?: string;
 }
 
 /**
@@ -150,6 +152,7 @@ export const ConsensusConfigSchema = z.object({
   escalationAction: z.enum(['pause', 'continue', 'abort']).default('pause'),
   temperature: z.number().min(0).max(2).default(0.3),
   maxTokens: z.number().min(100).max(32000).default(4096),
+  reviewerPersona: z.string().optional(),
 });
 
 /**

@@ -339,6 +339,48 @@ export async function storeSpecification(
 }
 
 /**
+ * Store discovered user documentation in project state
+ *
+ * @param projectDir - The project root directory
+ * @param userDocs - Combined user documentation content
+ * @returns The updated state
+ */
+export async function storeUserDocs(
+  projectDir: string,
+  userDocs: string
+): Promise<ProjectState> {
+  return updateState(projectDir, { userDocs });
+}
+
+/**
+ * Store brand context in project state
+ *
+ * @param projectDir - The project root directory
+ * @param brandContext - Brand context with logo path and primary color
+ * @returns The updated state
+ */
+export async function storeBrandContext(
+  projectDir: string,
+  brandContext: { logoPath?: string; primaryColor?: string }
+): Promise<ProjectState> {
+  return updateState(projectDir, { brandContext });
+}
+
+/**
+ * Store website strategy path in project state
+ *
+ * @param projectDir - The project root directory
+ * @param strategyPath - Relative path to strategy JSON file
+ * @returns The updated state
+ */
+export async function storeWebsiteStrategyPath(
+  projectDir: string,
+  strategyPath: string
+): Promise<ProjectState> {
+  return updateState(projectDir, { websiteStrategy: strategyPath });
+}
+
+/**
  * Mark the project as complete
  *
  * @param projectDir - The project root directory

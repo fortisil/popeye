@@ -782,6 +782,14 @@ function buildTaskContext(
 ): string {
   const lines: string[] = [];
 
+  // No-hardcode enforcement rule
+  lines.push('## CRITICAL RULES');
+  lines.push('- NEVER use hardcoded placeholder content, mock data, or invented copy.');
+  lines.push('- ALL text, features, pricing, colors, and data MUST come from the project specification and user documentation below.');
+  lines.push('- If information is not available in the spec, leave a TODO comment rather than inventing content.');
+  lines.push('- Do NOT hallucinate product names, features, pricing tiers, testimonials, or blog content.');
+  lines.push('');
+
   lines.push(`## Project: ${state.name}`);
   lines.push(`Language: ${state.language}`);
   lines.push('');
@@ -795,6 +803,19 @@ function buildTaskContext(
   if (state.plan) {
     lines.push('## Development Plan');
     lines.push(state.plan.slice(0, 2000));
+    lines.push('');
+  }
+
+  // Include user documentation if available
+  if (state.userDocs) {
+    lines.push('## Project Documentation');
+    lines.push(state.userDocs.slice(0, 3000));
+    lines.push('');
+  }
+
+  // Include brand context if available
+  if (state.brandContext?.primaryColor) {
+    lines.push(`## Brand: Primary color ${state.brandContext.primaryColor}`);
     lines.push('');
   }
 

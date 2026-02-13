@@ -1,190 +1,34 @@
 /**
- * Website templates for Next.js marketing sites
- * Generates SEO-ready Next.js App Router projects
+ * Website content templates for Next.js marketing sites
+ * Generates SEO-ready content pages with optional project context
+ * and strategy-driven marketing content
  */
 
-/**
- * Generate Next.js package.json
- */
-export function generateWebsitePackageJson(projectName: string): string {
-  return `{
-  "name": "${projectName}-website",
-  "version": "1.0.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev -p 3001",
-    "build": "next build",
-    "start": "next start -p 3001",
-    "lint": "next lint",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "next": "^14.1.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "lucide-react": "^0.312.0",
-    "clsx": "^2.1.0",
-    "tailwind-merge": "^2.2.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.11.0",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "autoprefixer": "^10.4.17",
-    "postcss": "^8.4.33",
-    "tailwindcss": "^3.4.1",
-    "typescript": "^5.3.3",
-    "@testing-library/react": "^14.1.2",
-    "@vitejs/plugin-react": "^4.2.1",
-    "vitest": "^1.2.0",
-    "jsdom": "^24.0.0"
-  }
-}
-`;
-}
-
-/**
- * Generate Next.js config
- */
-export function generateNextConfig(): string {
-  return `/** @type {import('next').NextConfig} */
-const nextConfig = {
-  // Enable React Strict Mode for better development
-  reactStrictMode: true,
-
-  // Image optimization
-  images: {
-    domains: [],
-    formats: ['image/avif', 'image/webp'],
-  },
-
-  // Disable x-powered-by header
-  poweredByHeader: false,
-
-  // Trailing slash config
-  trailingSlash: false,
-
-  // Headers for security
-  async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: [
-          {
-            key: 'X-DNS-Prefetch-Control',
-            value: 'on',
-          },
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff',
-          },
-        ],
-      },
-    ];
-  },
-};
-
-module.exports = nextConfig;
-`;
-}
-
-/**
- * Generate website tsconfig.json
- */
-export function generateWebsiteTsconfig(): string {
-  return `{
-  "compilerOptions": {
-    "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
-    "allowJs": true,
-    "skipLibCheck": true,
-    "strict": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "jsx": "preserve",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
-    "paths": {
-      "@/*": ["./src/*"]
-    }
-  },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
-}
-`;
-}
-
-/**
- * Generate Tailwind config for website
- */
-export function generateWebsiteTailwindConfig(): string {
-  return `import type { Config } from 'tailwindcss';
-
-const config: Config = {
-  content: [
-    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/components/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
-  ],
-  theme: {
-    extend: {
-      colors: {
-        primary: {
-          50: '#f0f9ff',
-          100: '#e0f2fe',
-          200: '#bae6fd',
-          300: '#7dd3fc',
-          400: '#38bdf8',
-          500: '#0ea5e9',
-          600: '#0284c7',
-          700: '#0369a1',
-          800: '#075985',
-          900: '#0c4a6e',
-        },
-      },
-      fontFamily: {
-        sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
-      },
-    },
-  },
-  plugins: [],
-};
-
-export default config;
-`;
-}
-
-/**
- * Generate PostCSS config for website
- */
-export function generateWebsitePostcssConfig(): string {
-  return `module.exports = {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
-};
-`;
-}
+import type { WebsiteContentContext } from '../website-context.js';
+// Strategy data is accessed via context.strategy (WebsiteContentContext includes it)
 
 /**
  * Generate root layout.tsx with metadata
  */
-export function generateWebsiteLayout(projectName: string): string {
+export function generateWebsiteLayout(
+  projectName: string,
+  context?: WebsiteContentContext
+): string {
   const title = projectName
     .split('-')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
+
+  const strategy = context?.strategy;
+  const displayName = context?.productName || title;
+  const desc = strategy?.messaging.longDescription
+    || context?.description
+    || `${displayName} - Your modern web application`;
+
+  // SEO keywords from strategy or defaults
+  const keywords = strategy?.seoStrategy.primaryKeywords
+    ? strategy.seoStrategy.primaryKeywords.map(k => `'${escapeJsx(k)}'`).join(', ')
+    : `'${projectName}', 'web app', 'nextjs'`;
 
   return `import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
@@ -195,27 +39,30 @@ const inter = Inter({
   variable: '--font-inter',
 });
 
+const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://${projectName}.com';
+
 export const metadata: Metadata = {
+  metadataBase: new URL(BASE_URL),
   title: {
-    default: '${title}',
-    template: '%s | ${title}',
+    default: '${escapeJsx(displayName)}',
+    template: '%s | ${escapeJsx(displayName)}',
   },
-  description: '${title} - Your modern web application',
-  keywords: ['${projectName}', 'web app', 'nextjs'],
-  authors: [{ name: '${title} Team' }],
-  creator: '${title}',
+  description: '${escapeJsx(desc)}',
+  keywords: [${keywords}],
+  authors: [{ name: '${escapeJsx(displayName)} Team' }],
+  creator: '${escapeJsx(displayName)}',
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://${projectName}.com',
-    siteName: '${title}',
-    title: '${title}',
-    description: '${title} - Your modern web application',
+    url: BASE_URL,
+    siteName: '${escapeJsx(displayName)}',
+    title: '${escapeJsx(displayName)}',
+    description: '${escapeJsx(desc)}',
   },
   twitter: {
     card: 'summary_large_image',
-    title: '${title}',
-    description: '${title} - Your modern web application',
+    title: '${escapeJsx(displayName)}',
+    description: '${escapeJsx(desc)}',
   },
   robots: {
     index: true,
@@ -240,9 +87,16 @@ export default function RootLayout({
 }
 
 /**
- * Generate globals.css
+ * Generate globals.css with optional brand colors
  */
-export function generateWebsiteGlobalsCss(): string {
+export function generateWebsiteGlobalsCss(
+  context?: WebsiteContentContext
+): string {
+  // Convert hex to HSL for CSS custom properties if brand color provided
+  const primaryHsl = context?.brand?.primaryColor
+    ? hexToHslString(context.brand.primaryColor)
+    : '199 89% 48%';
+
   return `@tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -251,7 +105,7 @@ export function generateWebsiteGlobalsCss(): string {
   :root {
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
-    --primary: 199 89% 48%;
+    --primary: ${primaryHsl};
     --primary-foreground: 210 40% 98%;
   }
 
@@ -269,257 +123,417 @@ export function generateWebsiteGlobalsCss(): string {
 }
 
 /**
- * Generate landing page.tsx
+ * Generate landing page.tsx with optional context-driven content
+ * When strategy is available, uses strategy messaging, trust signals, and CTAs
  */
-export function generateWebsiteLandingPage(projectName: string): string {
+export function generateWebsiteLandingPage(
+  projectName: string,
+  context?: WebsiteContentContext
+): string {
   const title = projectName
     .split('-')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 
+  const strategy = context?.strategy;
+  const displayName = context?.productName || title;
+
+  // Strategy-driven or context-driven hero
+  const headline = strategy?.messaging.headline || displayName;
+  const subheadline = strategy?.messaging.subheadline || '';
+  const heroText = strategy?.messaging.longDescription
+    ? escapeJsx(strategy.messaging.longDescription)
+    : context?.description
+    ? escapeJsx(context.description)
+    : null;
+
+  const features = context?.features && context.features.length > 0
+    ? context.features.slice(0, 6)
+    : null;
+
+  // CTAs from strategy or defaults
+  const primaryCtaText = strategy?.conversionStrategy.primaryCta.text || 'Get started';
+  const primaryCtaHref = strategy?.conversionStrategy.primaryCta.href || '/pricing';
+  const secondaryCtaText = strategy?.conversionStrategy.secondaryCta.text || 'Learn more';
+  const secondaryCtaHref = strategy?.conversionStrategy.secondaryCta.href || '/docs';
+
+  // Build hero paragraph
+  const heroParagraph = heroText
+    ? `              ${heroText}`
+    : `              {/* TODO: populate from project specification */}`;
+
+  // Build features array
+  const featuresBlock = features
+    ? features.map((f) =>
+        `                {\n                  title: '${escapeJsx(f.title)}',\n                  description: '${escapeJsx(f.description)}',\n                }`
+      ).join(',\n')
+    : `                {\n                  title: 'Feature 1',\n                  description: '/* TODO: populate from project specification */',\n                },\n                {\n                  title: 'Feature 2',\n                  description: '/* TODO: populate from project specification */',\n                },\n                {\n                  title: 'Feature 3',\n                  description: '/* TODO: populate from project specification */',\n                }`;
+
+  // Trust signals from strategy
+  const trustSignals = strategy?.conversionStrategy.trustSignals || [];
+  const trustSignalsBlock = trustSignals.length > 0
+    ? trustSignals.map(s => `        '${escapeJsx(s)}'`).join(',\n')
+    : '';
+
+  // Social proof from strategy
+  const socialProof = strategy?.conversionStrategy.socialProof || [];
+  const socialProofBlock = socialProof.length > 0
+    ? socialProof.map(s => `        '${escapeJsx(s)}'`).join(',\n')
+    : '';
+
+  // Build optional sections
+  const trustSection = trustSignals.length > 0 ? `
+      {/* Trust Signals */}
+      <section className="border-y border-gray-100 bg-gray-50 py-12">
+        <div className="container">
+          <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
+            {[
+${trustSignalsBlock}
+            ].map((signal) => (
+              <p key={signal} className="text-sm font-medium text-gray-600">{signal}</p>
+            ))}
+          </div>
+        </div>
+      </section>
+` : '';
+
+  const socialProofSection = socialProof.length > 0 ? `
+      {/* Social Proof */}
+      <section className="py-16 sm:py-24">
+        <div className="container">
+          <h2 className="text-center text-3xl font-bold tracking-tight text-gray-900">
+            Trusted by teams everywhere
+          </h2>
+          <div className="mx-auto mt-12 grid max-w-4xl grid-cols-1 gap-8 md:grid-cols-2">
+            {[
+${socialProofBlock}
+            ].map((quote, i) => (
+              <blockquote key={i} className="rounded-2xl border border-gray-200 p-6">
+                <p className="text-gray-700">&ldquo;{quote}&rdquo;</p>
+              </blockquote>
+            ))}
+          </div>
+        </div>
+      </section>
+` : '';
+
+  // Metadata: strategy-driven or default
+  const metaTitle = strategy?.seoStrategy.titleTemplates?.home || 'Welcome';
+  const metaDesc = strategy?.seoStrategy.metaDescriptions?.home || `Welcome to ${displayName}`;
+
   return `import type { Metadata } from 'next';
 import Link from 'next/link';
+import Header from '@/components/Header';
+import Footer from '@/components/Footer';
+import JsonLd from '@/components/JsonLd';
 
 export const metadata: Metadata = {
-  title: 'Welcome',
-  description: 'Welcome to ${title} - Your modern web application',
+  title: '${escapeJsx(metaTitle)}',
+  description: '${escapeJsx(metaDesc)}',
+};
+
+const ORG_SCHEMA = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: '${escapeJsx(displayName)}',
+  url: process.env.NEXT_PUBLIC_SITE_URL || 'https://${projectName}.com',
+};
+
+const PRODUCT_SCHEMA = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: '${escapeJsx(displayName)}',
+  applicationCategory: 'BusinessApplication',
+  operatingSystem: 'Web',
 };
 
 export default function HomePage() {
   return (
-    <main className="flex min-h-screen flex-col">
-      {/* Hero Section */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-primary-50 to-white py-20 sm:py-32">
-        <div className="container">
-          <div className="mx-auto max-w-2xl text-center">
-            <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-6xl">
-              ${title}
-            </h1>
-            <p className="mt-6 text-lg leading-8 text-gray-600">
-              Build something amazing with our modern, scalable platform.
-              Get started today and see the difference.
-            </p>
-            <div className="mt-10 flex items-center justify-center gap-x-6">
-              <Link
-                href="/pricing"
-                className="rounded-md bg-primary-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600"
-              >
-                Get started
-              </Link>
-              <Link
-                href="/docs"
-                className="text-sm font-semibold leading-6 text-gray-900 hover:text-primary-600"
-              >
-                Learn more <span aria-hidden="true">-&gt;</span>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section className="py-20 sm:py-32">
-        <div className="container">
-          <div className="mx-auto max-w-2xl text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
-              Everything you need
-            </h2>
-            <p className="mt-4 text-lg text-gray-600">
-              All the features you need to build amazing products.
-            </p>
-          </div>
-          <div className="mx-auto mt-16 max-w-5xl">
-            <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
-              {[
-                {
-                  title: 'Fast',
-                  description: 'Optimized for speed and performance.',
-                },
-                {
-                  title: 'Secure',
-                  description: 'Built with security best practices.',
-                },
-                {
-                  title: 'Scalable',
-                  description: 'Grows with your business needs.',
-                },
-              ].map((feature) => (
-                <div
-                  key={feature.title}
-                  className="rounded-2xl border border-gray-200 p-8"
+    <>
+      <Header />
+      <JsonLd schema={ORG_SCHEMA} />
+      <JsonLd schema={PRODUCT_SCHEMA} />
+      <main className="flex min-h-screen flex-col">
+        {/* Hero Section */}
+        <section className="relative overflow-hidden bg-gradient-to-b from-primary-50 to-white py-20 sm:py-32">
+          <div className="container">
+            <div className="mx-auto max-w-2xl text-center">
+              <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-6xl">
+                ${escapeJsx(headline)}
+              </h1>
+${subheadline ? `              <p className="mt-4 text-xl font-medium text-primary-600">\n                ${escapeJsx(subheadline)}\n              </p>` : ''}
+              <p className="mt-6 text-lg leading-8 text-gray-600">
+${heroParagraph}
+              </p>
+              <div className="mt-10 flex items-center justify-center gap-x-6">
+                <Link
+                  href="${escapeJsx(primaryCtaHref)}"
+                  className="rounded-md bg-primary-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600"
                 >
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    {feature.title}
-                  </h3>
-                  <p className="mt-2 text-gray-600">{feature.description}</p>
-                </div>
-              ))}
+                  ${escapeJsx(primaryCtaText)}
+                </Link>
+                <Link
+                  href="${escapeJsx(secondaryCtaHref)}"
+                  className="text-sm font-semibold leading-6 text-gray-900 hover:text-primary-600"
+                >
+                  ${escapeJsx(secondaryCtaText)} <span aria-hidden="true">-&gt;</span>
+                </Link>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-gray-200 py-12">
-        <div className="container">
-          <p className="text-center text-sm text-gray-500">
-            &copy; {new Date().getFullYear()} ${title}. All rights reserved.
-          </p>
-        </div>
-      </footer>
-    </main>
+        </section>
+${trustSection}
+        {/* Features Section */}
+        <section id="features" className="py-20 sm:py-32">
+          <div className="container">
+            <div className="mx-auto max-w-2xl text-center">
+              <h2 className="text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
+                Everything you need
+              </h2>
+              <p className="mt-4 text-lg text-gray-600">
+                {/* TODO: populate section subtitle from project specification */}
+              </p>
+            </div>
+            <div className="mx-auto mt-16 max-w-5xl">
+              <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-3">
+                {[
+${featuresBlock}
+                ].map((feature) => (
+                  <div
+                    key={feature.title}
+                    className="rounded-2xl border border-gray-200 p-8"
+                  >
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {feature.title}
+                    </h3>
+                    <p className="mt-2 text-gray-600">{feature.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+${socialProofSection}
+        {/* CTA Section */}
+        <section className="bg-primary-600 py-16 sm:py-24">
+          <div className="container text-center">
+            <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+              Ready to get started?
+            </h2>
+            <p className="mt-4 text-lg text-primary-100">
+              ${strategy?.messaging.elevatorPitch ? escapeJsx(strategy.messaging.elevatorPitch) : 'Start building today.'}
+            </p>
+            <div className="mt-8">
+              <Link
+                href="${escapeJsx(primaryCtaHref)}"
+                className="rounded-md bg-white px-6 py-3 text-sm font-semibold text-primary-600 shadow-sm hover:bg-primary-50"
+              >
+                ${escapeJsx(primaryCtaText)}
+              </Link>
+            </div>
+          </div>
+        </section>
+      </main>
+      <Footer />
+    </>
   );
 }
 `;
 }
 
 /**
- * Generate pricing page
+ * Generate pricing page with optional context-driven tiers and FAQ
  */
-export function generateWebsitePricingPage(projectName: string): string {
+export function generateWebsitePricingPage(
+  projectName: string,
+  context?: WebsiteContentContext
+): string {
   const title = projectName
     .split('-')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 
-  return `import type { Metadata } from 'next';
+  const strategy = context?.strategy;
+  const displayName = context?.productName || title;
+  const tiers = context?.pricing && context.pricing.length > 0
+    ? context.pricing
+    : null;
 
-export const metadata: Metadata = {
-  title: 'Pricing',
-  description: 'Choose the perfect plan for your needs - ${title}',
-};
-
-const tiers = [
-  {
-    name: 'Free',
-    price: '$0',
-    description: 'Perfect for getting started',
-    features: ['Up to 3 projects', 'Basic support', 'Community access'],
+  // Build tiers array
+  const tiersBlock = tiers
+    ? tiers.map((t) => {
+        const featuresStr = t.features.map((f) => `      '${escapeJsx(f)}'`).join(',\n');
+        return `  {
+    name: '${escapeJsx(t.name)}',
+    price: '${escapeJsx(t.price)}',
+    description: '${escapeJsx(t.description)}',
+    features: [
+${featuresStr}
+    ],
+    cta: '${escapeJsx(t.cta)}',
+    featured: ${t.featured ? 'true' : 'false'},
+  }`;
+      }).join(',\n')
+    : `  {
+    name: '/* TODO: tier name */',
+    price: '/* TODO */',
+    description: '/* TODO: populate from project specification */',
+    features: ['/* TODO: populate from project specification */'],
     cta: 'Get started',
     featured: false,
   },
   {
-    name: 'Pro',
-    price: '$29',
-    description: 'For growing teams',
-    features: [
-      'Unlimited projects',
-      'Priority support',
-      'Advanced analytics',
-      'Custom integrations',
-    ],
+    name: '/* TODO: tier name */',
+    price: '/* TODO */',
+    description: '/* TODO: populate from project specification */',
+    features: ['/* TODO: populate from project specification */'],
     cta: 'Start free trial',
     featured: true,
   },
   {
-    name: 'Enterprise',
-    price: 'Custom',
-    description: 'For large organizations',
-    features: [
-      'Everything in Pro',
-      'Dedicated support',
-      'SLA guarantee',
-      'Custom contracts',
-    ],
+    name: '/* TODO: tier name */',
+    price: '/* TODO */',
+    description: '/* TODO: populate from project specification */',
+    features: ['/* TODO: populate from project specification */'],
     cta: 'Contact sales',
     featured: false,
-  },
+  }`;
+
+  // Pricing metadata from strategy or defaults
+  const metaTitle = strategy?.seoStrategy.titleTemplates?.pricing || 'Pricing';
+  const metaDesc = strategy?.seoStrategy.metaDescriptions?.pricing || `Choose the perfect plan for your needs - ${displayName}`;
+
+  // Enterprise CTA from strategy
+  const enterpriseCtaText = strategy?.conversionStrategy.primaryCta.text || 'Contact Sales';
+
+  return `import type { Metadata } from 'next';
+import Link from 'next/link';
+import Header from '@/components/Header';
+import Footer from '@/components/Footer';
+
+export const metadata: Metadata = {
+  title: '${escapeJsx(metaTitle)}',
+  description: '${escapeJsx(metaDesc)}',
+};
+
+const tiers = [
+${tiersBlock}
 ];
 
 export default function PricingPage() {
   return (
-    <main className="py-20 sm:py-32">
-      <div className="container">
-        <div className="mx-auto max-w-2xl text-center">
-          <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
-            Simple, transparent pricing
-          </h1>
-          <p className="mt-6 text-lg text-gray-600">
-            Choose the plan that works best for you.
-          </p>
-        </div>
+    <>
+      <Header />
+      <main className="py-20 sm:py-32">
+        <div className="container">
+          <div className="mx-auto max-w-2xl text-center">
+            <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl">
+              Simple, transparent pricing
+            </h1>
+            <p className="mt-6 text-lg text-gray-600">
+              Choose the plan that works best for you.
+            </p>
+          </div>
 
-        <div className="mx-auto mt-16 grid max-w-lg grid-cols-1 gap-8 lg:max-w-5xl lg:grid-cols-3">
-          {tiers.map((tier) => (
-            <div
-              key={tier.name}
-              className={\`rounded-2xl p-8 \${
-                tier.featured
-                  ? 'bg-primary-600 text-white ring-2 ring-primary-600'
-                  : 'border border-gray-200 bg-white'
-              }\`}
-            >
-              <h2
-                className={\`text-lg font-semibold \${
-                  tier.featured ? 'text-white' : 'text-gray-900'
+          <div className="mx-auto mt-16 grid max-w-lg grid-cols-1 gap-8 lg:max-w-5xl lg:grid-cols-3">
+            {tiers.map((tier) => (
+              <div
+                key={tier.name}
+                className={\`rounded-2xl p-8 \${
+                  tier.featured
+                    ? 'bg-primary-600 text-white ring-2 ring-primary-600'
+                    : 'border border-gray-200 bg-white'
                 }\`}
               >
-                {tier.name}
-              </h2>
-              <p
-                className={\`mt-2 text-sm \${
-                  tier.featured ? 'text-primary-100' : 'text-gray-600'
-                }\`}
-              >
-                {tier.description}
-              </p>
-              <p className="mt-6">
-                <span
-                  className={\`text-4xl font-bold \${
+                <h2
+                  className={\`text-lg font-semibold \${
                     tier.featured ? 'text-white' : 'text-gray-900'
                   }\`}
                 >
-                  {tier.price}
-                </span>
-                {tier.price !== 'Custom' && (
+                  {tier.name}
+                </h2>
+                <p
+                  className={\`mt-2 text-sm \${
+                    tier.featured ? 'text-primary-100' : 'text-gray-600'
+                  }\`}
+                >
+                  {tier.description}
+                </p>
+                <p className="mt-6">
                   <span
-                    className={\`text-sm \${
-                      tier.featured ? 'text-primary-100' : 'text-gray-600'
+                    className={\`text-4xl font-bold \${
+                      tier.featured ? 'text-white' : 'text-gray-900'
                     }\`}
                   >
-                    /month
+                    {tier.price}
                   </span>
-                )}
-              </p>
-              <ul className="mt-8 space-y-4">
-                {tier.features.map((feature) => (
-                  <li
-                    key={feature}
-                    className={\`flex text-sm \${
-                      tier.featured ? 'text-primary-100' : 'text-gray-600'
-                    }\`}
-                  >
-                    <svg
-                      className={\`h-5 w-5 flex-shrink-0 \${
-                        tier.featured ? 'text-white' : 'text-primary-600'
+                  {tier.price !== 'Custom' && (
+                    <span
+                      className={\`text-sm \${
+                        tier.featured ? 'text-primary-100' : 'text-gray-600'
                       }\`}
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
                     >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="ml-3">{feature}</span>
-                  </li>
-                ))}
-              </ul>
-              <button
-                className={\`mt-8 w-full rounded-md px-4 py-2 text-sm font-semibold \${
-                  tier.featured
-                    ? 'bg-white text-primary-600 hover:bg-primary-50'
-                    : 'bg-primary-600 text-white hover:bg-primary-500'
-                }\`}
-              >
-                {tier.cta}
-              </button>
-            </div>
-          ))}
+                      /month
+                    </span>
+                  )}
+                </p>
+                <ul className="mt-8 space-y-4">
+                  {tier.features.map((feature) => (
+                    <li
+                      key={feature}
+                      className={\`flex text-sm \${
+                        tier.featured ? 'text-primary-100' : 'text-gray-600'
+                      }\`}
+                    >
+                      <svg
+                        className={\`h-5 w-5 flex-shrink-0 \${
+                          tier.featured ? 'text-white' : 'text-primary-600'
+                        }\`}
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                      <span className="ml-3">{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  className={\`mt-8 w-full rounded-md px-4 py-2 text-sm font-semibold \${
+                    tier.featured
+                      ? 'bg-white text-primary-600 hover:bg-primary-50'
+                      : 'bg-primary-600 text-white hover:bg-primary-500'
+                  }\`}
+                >
+                  {tier.cta}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Enterprise CTA */}
+          <div className="mx-auto mt-16 max-w-2xl text-center">
+            <h2 className="text-2xl font-bold text-gray-900">
+              Need a custom plan?
+            </h2>
+            <p className="mt-4 text-gray-600">
+              Contact our sales team for enterprise pricing and custom solutions.
+            </p>
+            <Link
+              href="/contact"
+              className="mt-6 inline-block rounded-md border border-primary-600 px-6 py-3 text-sm font-semibold text-primary-600 hover:bg-primary-50"
+            >
+              ${escapeJsx(enterpriseCtaText)}
+            </Link>
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+      <Footer />
+    </>
   );
 }
 `;
@@ -588,55 +602,6 @@ export default function robots(): MetadataRoute.Robots {
 }
 
 /**
- * Generate website Dockerfile
- */
-export function generateWebsiteDockerfile(): string {
-  return `# Build stage
-FROM node:20-alpine AS builder
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies
-RUN npm ci
-
-# Copy source
-COPY . .
-
-# Build
-RUN npm run build
-
-# Production stage
-FROM node:20-alpine AS runner
-
-WORKDIR /app
-
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-
-# Create non-root user
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-
-# Copy built assets
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-
-USER nextjs
-
-EXPOSE 3000
-
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-
-CMD ["node", "server.js"]
-`;
-}
-
-/**
  * Generate website README
  */
 export function generateWebsiteReadme(projectName: string): string {
@@ -700,22 +665,29 @@ content/
 }
 
 /**
- * Generate website spec JSON
+ * Generate website spec JSON with optional context
  */
-export function generateWebsiteSpec(projectName: string): string {
+export function generateWebsiteSpec(
+  projectName: string,
+  context?: WebsiteContentContext
+): string {
   const title = projectName
     .split('-')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 
+  const displayName = context?.productName || title;
+  const tagline = context?.tagline || context?.description || 'Build something amazing';
+  const primaryColor = context?.brand?.primaryColor || '#0ea5e9';
+
   return JSON.stringify(
     {
       version: '1.0',
       brand: {
-        name: title,
-        tagline: 'Build something amazing',
+        name: displayName,
+        tagline,
         colors: {
-          primary: '#0ea5e9',
+          primary: primaryColor,
           secondary: '#64748b',
           accent: '#f59e0b',
           background: '#ffffff',
@@ -727,8 +699,8 @@ export function generateWebsiteSpec(projectName: string): string {
         },
       },
       seo: {
-        title: title,
-        description: `${title} - Your modern web application`,
+        title: displayName,
+        description: context?.description || `${displayName} - Your modern web application`,
         keywords: [projectName, 'web app', 'nextjs', 'saas'],
         locale: 'en_US',
       },
@@ -755,58 +727,6 @@ export function generateWebsiteSpec(projectName: string): string {
 }
 
 /**
- * Generate vitest config for website
- */
-export function generateWebsiteVitestConfig(): string {
-  return `import { defineConfig } from 'vitest/config';
-import react from '@vitejs/plugin-react';
-import path from 'path';
-
-export default defineConfig({
-  plugins: [react()],
-  test: {
-    environment: 'jsdom',
-    include: ['**/*.test.{ts,tsx}'],
-    globals: true,
-    setupFiles: ['./tests/setup.ts'],
-  },
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
-  },
-});
-`;
-}
-
-/**
- * Generate vitest setup for website
- */
-export function generateWebsiteVitestSetup(): string {
-  return `import '@testing-library/jest-dom';
-
-// Mock next/navigation
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    prefetch: vi.fn(),
-  }),
-  useSearchParams: () => new URLSearchParams(),
-  usePathname: () => '/',
-}));
-
-// Mock next/image
-vi.mock('next/image', () => ({
-  default: (props: Record<string, unknown>) => {
-    // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
-    return <img {...props} />;
-  },
-}));
-`;
-}
-
-/**
  * Generate sample test for website
  */
 export function generateWebsiteTest(projectName: string): string {
@@ -829,13 +749,6 @@ describe('HomePage', () => {
     render(<HomePage />);
     expect(screen.getByRole('link', { name: /get started/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /learn more/i })).toBeInTheDocument();
-  });
-
-  it('renders feature cards', () => {
-    render(<HomePage />);
-    expect(screen.getByText('Fast')).toBeInTheDocument();
-    expect(screen.getByText('Secure')).toBeInTheDocument();
-    expect(screen.getByText('Scalable')).toBeInTheDocument();
   });
 });
 `;
@@ -894,13 +807,46 @@ export default function BlogPage() {
 }
 
 /**
- * Generate Next.js environment declaration
+ * Escape a string for safe use inside JSX template literals
  */
-export function generateWebsiteNextEnv(): string {
-  return `/// <reference types="next" />
-/// <reference types="next/image-types/global" />
+function escapeJsx(str: string): string {
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/`/g, '\\`')
+    .replace(/\$/g, '\\$');
+}
 
-// NOTE: This file should not be edited
-// see https://nextjs.org/docs/basic-features/typescript for more information.
-`;
+/**
+ * Convert hex color to HSL string for CSS custom properties
+ * Returns format: "H S% L%"
+ */
+function hexToHslString(hex: string): string {
+  // Remove # prefix
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16) / 255;
+  const g = parseInt(h.substring(2, 4), 16) / 255;
+  const b = parseInt(h.substring(4, 6), 16) / 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+
+  if (max === min) {
+    return `0 0% ${Math.round(l * 100)}%`;
+  }
+
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+
+  let hue = 0;
+  if (max === r) {
+    hue = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  } else if (max === g) {
+    hue = ((b - r) / d + 2) / 6;
+  } else {
+    hue = ((r - g) / d + 4) / 6;
+  }
+
+  return `${Math.round(hue * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
 }

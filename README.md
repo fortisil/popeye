@@ -17,58 +17,84 @@ Popeye is an autonomous software development agent that takes a simple project i
 
 1. **Understands** your idea and expands it into a detailed specification
 2. **Designs** the UI automatically based on the project context
-3. **Plans** a complete development roadmap with milestones and tasks
-4. **Validates** the plan through AI consensus (multiple AI systems must agree)
-5. **Implements** each task autonomously, writing production-quality code
-6. **Styles** the application with a professional design system and component library
-7. **Tests** the implementation and fixes issues automatically
-8. **Delivers** a complete, working project with polished UI
+3. **Strategizes** (website projects) by generating a marketing strategy with ICP, positioning, SEO, and conversion goals
+4. **Plans** a complete development roadmap with milestones and tasks
+5. **Validates** the plan through AI consensus (multiple AI systems must agree)
+6. **Implements** each task autonomously, writing production-quality code
+7. **Styles** the application with a professional design system and component library
+8. **Tests** the implementation and fixes issues automatically
+9. **Delivers** a complete, working project with polished UI
 
 ## How It Works
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         POPEYE WORKFLOW                             │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│   [Your Idea] ──► [Specification] ──► [UI Design] ──► [Dev Plan]   │
-│                        ▲                   │               │        │
-│                        │                   │               ▼        │
-│                   OpenAI expands      Auto-design    Claude creates │
-│                                       theme/style                   │
-│                                                            │        │
-│                                                            ▼        │
-│                   ┌─────────────────────────────────────┐          │
-│                   │      CONSENSUS LOOP (95%+)          │          │
-│                   │  ┌─────────┐     ┌─────────┐       │          │
-│                   │  │ OpenAI  │◄───►│ Claude  │       │          │
-│                   │  │ Reviews │     │ Revises │       │          │
-│                   │  └─────────┘     └─────────┘       │          │
-│                   └─────────────────────────────────────┘          │
-│                                              │                      │
-│                                              ▼                      │
-│                   ┌─────────────────────────────────────┐          │
-│                   │      EXECUTION MODE                  │          │
-│                   │  For each task:                      │          │
-│                   │    1. Claude implements              │          │
-│                   │    2. Tests run automatically        │          │
-│                   │    3. Fix issues (up to 3 retries)   │          │
-│                   │    4. Mark complete                  │          │
-│                   └─────────────────────────────────────┘          │
-│                                              │                      │
-│                                              ▼                      │
-│                   ┌─────────────────────────────────────┐          │
-│                   │      UI SETUP & STYLING              │          │
-│                   │  - Install Tailwind CSS              │          │
-│                   │  - Configure shadcn/ui components    │          │
-│                   │  - Apply selected theme              │          │
-│                   └─────────────────────────────────────┘          │
-│                                              │                      │
-│                                              ▼                      │
-│                        [Complete Project with Polished UI]          │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                            POPEYE WORKFLOW                               │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  [Your Idea] ──► [Specification] ──► [UI Design] ──► [Dev Plan]         │
+│                       ▲                   │               │              │
+│                       │                   │               ▼              │
+│                  OpenAI expands      Auto-design    Claude creates       │
+│                                      theme/style                         │
+│                                                           │              │
+│                                                           ▼              │
+│                  ┌────────────────────────────────────────────┐          │
+│                  │  WEBSITE STRATEGY (website/all projects)   │          │
+│                  │  - AI generates WebsiteStrategyDocument    │          │
+│                  │  - ICP, positioning, messaging, SEO        │          │
+│                  │  - Site architecture, conversion goals     │          │
+│                  │  - Cached via SHA-256 hash                 │          │
+│                  └────────────────────────────────────────────┘          │
+│                                                           │              │
+│                                                           ▼              │
+│                  ┌────────────────────────────────────────────┐          │
+│                  │      CONSENSUS LOOP (95%+)                 │          │
+│                  │  ┌─────────┐     ┌─────────┐              │          │
+│                  │  │ OpenAI  │◄───►│ Claude  │              │          │
+│                  │  │ Reviews │     │ Revises │              │          │
+│                  │  └─────────┘     └─────────┘              │          │
+│                  │  (Marketing persona for website projects)  │          │
+│                  └────────────────────────────────────────────┘          │
+│                                                           │              │
+│                                                           ▼              │
+│                  ┌────────────────────────────────────────────┐          │
+│                  │      EXECUTION MODE                        │          │
+│                  │  For each task:                             │          │
+│                  │    1. Claude implements                     │          │
+│                  │    2. Tests run automatically               │          │
+│                  │    3. Fix issues (up to 3 retries)          │          │
+│                  │    4. Mark complete                         │          │
+│                  └────────────────────────────────────────────┘          │
+│                                                           │              │
+│                                                           ▼              │
+│                  ┌────────────────────────────────────────────┐          │
+│                  │      UI SETUP & STYLING                     │          │
+│                  │  - Install Tailwind CSS                     │          │
+│                  │  - Configure shadcn/ui components           │          │
+│                  │  - Apply selected theme                     │          │
+│                  └────────────────────────────────────────────┘          │
+│                                                           │              │
+│                                                           ▼              │
+│                       [Complete Project with Polished UI]                │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Strategy-First Website Generation
+
+For website and ALL projects, Popeye now includes a **strategy-first pipeline** that generates a complete marketing strategy document before any code is written:
+
+```
+[Product Docs] --> [AI Strategy Generation] --> [WebsiteStrategyDocument]
+                                                        |
+                    +-----------+-----------+-----------+
+                    |           |           |           |
+                 Landing    Pricing     SEO/Meta    Lead Capture
+                  Page       Page      Components    System
+```
+
+The strategy document drives all downstream code generation, ensuring consistent messaging, SEO keywords, navigation structure, and conversion goals across every page.
 
 ### Multi-AI Consensus System
 
@@ -330,7 +356,11 @@ Popeye provides real-time feedback:
 [UI Design] UI Intent: modern style for consumer audience
 [UI Design] Selected theme: Modern Blue
 [UI Design] UI design complete: Modern Blue theme with 12 components
-[Consensus] Review round 1: 78% agreement
+[Website Strategy] Analyzing product context for strategy...
+[Website Strategy] Generating website strategy via AI...
+[Website Strategy] Validating strategy schema...
+[Website Strategy] Strategy cached to .popeye/website-strategy.json
+[Consensus] Review round 1: 78% agreement (Marketing Strategist persona)
 [Consensus] Addressing concerns...
 [Consensus] Review round 2: 92% agreement
 [Consensus] Review round 3: 97% agreement - APPROVED
@@ -345,6 +375,8 @@ Popeye provides real-time feedback:
 [UI Setup] UI setup complete: 5 components installed
 [Complete] Project built successfully!
 ```
+
+**Note:** The `[Website Strategy]` steps appear only for `website` and `all` project types. The marketing strategist persona for consensus review is also specific to website projects.
 
 ## Features
 
@@ -385,6 +417,69 @@ Popeye automatically handles all UI/UX decisions, eliminating the need for manua
 - **Mobile-First Design**: Responsive layouts out of the box
 
 The UI design specification is saved to `.popeye/ui-spec.json` and is used to guide all code generation, ensuring consistent styling throughout the project.
+
+### Production Marketing Website Generation
+
+Popeye generates production-quality marketing websites through a strategy-first approach. Instead of generating generic templates, the system first creates a comprehensive marketing strategy document, then uses it to drive every aspect of the generated website.
+
+#### Website Strategy Document
+
+When you create a `website` or `all` project, Popeye generates a `WebsiteStrategyDocument` containing:
+
+| Section | Contents |
+|---------|----------|
+| **ICP (Ideal Customer Profile)** | Primary persona, pain points, goals, objections |
+| **Positioning** | Category, differentiators, value proposition, proof points |
+| **Messaging** | Headline, subheadline, elevator pitch, long description |
+| **SEO Strategy** | Primary/secondary/long-tail keywords, title templates, meta descriptions |
+| **Site Architecture** | Pages with types, sections, SEO keywords, conversion goals, navigation, footer |
+| **Conversion Strategy** | Primary/secondary CTAs, trust signals, social proof, lead capture provider |
+| **Competitive Context** | Category, competitors (user-supplied only), differentiators |
+
+The strategy is cached in `.popeye/website-strategy.json` with a SHA-256 hash of the inputs. It is only regenerated when inputs change (product docs, specification, or brand assets).
+
+#### Generated Website Components
+
+The strategy drives generation of the following production components:
+
+- **Header** (`Header.tsx`): Logo with image/text fallback, strategy-driven navigation, primary CTA button, mobile hamburger menu with `aria-label` and `aria-expanded`
+- **Footer** (`Footer.tsx`): Multi-column link sections from strategy, brand column with tagline, copyright
+- **Navigation** (`nav.ts`): Exportable navigation config supporting nested items
+- **Landing Page**: Strategy-driven hero headline, trust signals, social proof sections, dual CTAs
+- **Pricing Page**: Strategy-aware with enterprise CTA variant
+- **JSON-LD** (`JsonLd.tsx`): Reusable structured data component (Organization + SoftwareApplication schemas)
+- **Sitemap** (`sitemap.ts`): Strategy-aware with per-page-type priority and change frequency
+- **Robots.txt** (`robots.ts`): Standard configuration with sitemap reference
+- **404 Page** (`not-found.tsx`): Branded error page with back-to-home CTA
+- **500 Page** (`error.tsx`): Client error boundary with retry button
+- **Web Manifest** (`manifest.webmanifest`): PWA manifest with brand colors and icons
+- **Meta Helper** (`meta.ts`): Utility for building page-level metadata with OpenGraph and Twitter cards
+- **Contact Form** (`ContactForm.tsx`): Lead capture form with loading/success/error states
+- **Lead Capture API** (`api/lead/route.ts`): Server-side handler supporting webhook, Resend, or Postmark providers
+
+#### Lead Capture System
+
+The lead capture system supports three provider configurations:
+
+| Provider | Environment Variables | Description |
+|----------|----------------------|-------------|
+| **webhook** | `LEAD_WEBHOOK_URL` | Sends lead data to any HTTP endpoint |
+| **resend** | `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `LEAD_NOTIFICATION_EMAIL` | Sends email notifications via Resend |
+| **postmark** | `POSTMARK_API_KEY`, `POSTMARK_FROM_EMAIL`, `LEAD_NOTIFICATION_EMAIL` | Sends email notifications via Postmark |
+
+The provider is selected by the AI strategy based on project context, and the corresponding `.env.example` entries are generated automatically.
+
+#### Brand Assets Contract
+
+Popeye automatically discovers brand assets (logos, favicons, color schemes) from your project documentation directory and maps them to deterministic output paths:
+
+- Logo files are copied to `public/brand/logo.{ext}`
+- Primary brand color is extracted from design docs or CSS variables
+- The `BrandAssetsContract` interface ensures consistent logo placement across Header, manifest, and metadata
+
+#### Reviewer Persona Switching
+
+For website projects, the consensus reviewer automatically switches to a **Senior Product Marketing Strategist** persona instead of the default technical reviewer. This ensures the plan is evaluated for marketing effectiveness, conversion optimization, and SEO quality rather than purely technical criteria. The `reviewerPersona` field in `ConsensusConfig` controls this behavior and is threaded through all adapter implementations (OpenAI, Gemini, Grok).
 
 ### Fullstack Project Support
 
@@ -987,18 +1082,40 @@ my-project/
 ├── apps/
 │   ├── frontend/              # React application
 │   ├── backend/               # FastAPI backend
-│   └── website/               # Marketing/landing site
+│   └── website/               # Marketing/landing site (Next.js)
 │       ├── src/
-│       │   ├── pages/
+│       │   ├── app/
+│       │   │   ├── layout.tsx         # Root layout with metadataBase
+│       │   │   ├── page.tsx           # Strategy-driven landing page
+│       │   │   ├── pricing/page.tsx   # Pricing with enterprise CTA
+│       │   │   ├── not-found.tsx      # Branded 404 page
+│       │   │   ├── error.tsx          # Error boundary (500)
+│       │   │   ├── sitemap.ts         # Strategy-aware sitemap
+│       │   │   ├── robots.ts          # Robots.txt config
+│       │   │   └── api/
+│       │   │       └── lead/route.ts  # Lead capture endpoint
 │       │   ├── components/
-│       │   └── content/
+│       │   │   ├── Header.tsx         # Logo/nav/CTA/mobile menu
+│       │   │   ├── Footer.tsx         # Multi-column footer
+│       │   │   ├── JsonLd.tsx         # Structured data component
+│       │   │   └── ContactForm.tsx    # Lead capture form
+│       │   └── lib/
+│       │       ├── nav.ts             # Navigation config
+│       │       └── meta.ts            # Metadata helper utility
 │       ├── public/
+│       │   ├── brand/                 # Discovered brand assets
+│       │   │   └── logo.{ext}
+│       │   └── manifest.webmanifest   # PWA manifest
 │       ├── package.json
-│       └── astro.config.mjs   # (or next.config.js, etc.)
+│       └── next.config.js
 │
 ├── docs/
 │   └── plans/                 # Includes website/ directories
 │       └── ...
+├── .popeye/
+│   ├── state.json
+│   ├── ui-spec.json
+│   └── website-strategy.json  # Cached strategy (SHA-256 hash)
 └── ...
 ```
 
@@ -1054,6 +1171,31 @@ The UI specification is stored in `.popeye/ui-spec.json` and contains:
   "designNotes": "Use Modern Blue theme consistently..."
 }
 ```
+
+### Website Strategy Cache
+
+For website and ALL projects, the marketing strategy is stored in `.popeye/website-strategy.json`:
+
+```json
+{
+  "strategy": {
+    "icp": { "primaryPersona": "...", "painPoints": [...] },
+    "positioning": { "valueProposition": "..." },
+    "messaging": { "headline": "...", "subheadline": "..." },
+    "seoStrategy": { "primaryKeywords": [...], "titleTemplates": {...} },
+    "siteArchitecture": { "pages": [...], "navigation": [...] },
+    "conversionStrategy": { "primaryCta": {...}, "leadCapture": "webhook" },
+    "competitiveContext": { "differentiators": [...] }
+  },
+  "metadata": {
+    "inputHash": "sha256-of-product-context-and-brand-assets",
+    "generatedAt": "2026-02-13T...",
+    "version": 1
+  }
+}
+```
+
+The `inputHash` enables automatic staleness detection -- when product docs or brand assets change, the strategy is regenerated.
 
 ### Design Context in Code Generation
 
@@ -1142,13 +1284,13 @@ src/
 ├── cli/                  # CLI interface
 │   ├── index.ts          # Command setup
 │   ├── output.ts         # Output formatting
-│   ├── interactive.ts    # REPL mode (with /model, /upgrade commands)
+│   ├── interactive.ts    # REPL mode (with /model, /upgrade, /overview commands)
 │   └── commands/         # Individual commands
 ├── adapters/             # AI service adapters
 │   ├── claude.ts         # Claude Agent SDK (with rate limiting)
-│   ├── openai.ts         # OpenAI API (default reviewer)
-│   ├── gemini.ts         # Google Gemini API (reviewer/arbitrator)
-│   └── grok.ts           # xAI Grok API (reviewer/arbitrator)
+│   ├── openai.ts         # OpenAI API (default reviewer, marketing persona for websites)
+│   ├── gemini.ts         # Google Gemini API (reviewer/arbitrator, persona support)
+│   └── grok.ts           # xAI Grok API (reviewer/arbitrator, persona support)
 ├── auth/                 # Authentication
 │   ├── keychain.ts       # Credential storage
 │   └── server.ts         # OAuth callback server
@@ -1160,9 +1302,20 @@ src/
 │   ├── python.ts         # Python scaffolding
 │   ├── typescript.ts     # TypeScript scaffolding
 │   ├── fullstack.ts      # Fullstack scaffolding (React + FastAPI)
-│   ├── website.ts        # Website scaffolding (Next.js)
+│   ├── website.ts        # Website scaffolding (Next.js, strategy-aware)
+│   ├── website-context.ts # Doc discovery, brand assets, content context builder
+│   ├── doc-parser.ts     # Product doc parsing (name, tagline, features, pricing, color)
 │   ├── all.ts            # ALL project scaffolding (exports 5 generator functions)
 │   └── templates/        # File templates
+│       ├── python.ts
+│       ├── typescript.ts
+│       ├── fullstack.ts
+│       ├── website.ts          # Strategy-aware landing + pricing pages
+│       ├── website-config.ts   # Non-content config templates
+│       ├── website-components.ts # Header, Footer, Navigation components
+│       ├── website-seo.ts      # JSON-LD, sitemap, robots, 404, 500, manifest, meta
+│       ├── website-conversion.ts # Lead capture route, contact form, env examples
+│       └── index.ts            # Template module exports
 ├── state/                # State management
 │   ├── persistence.ts    # File operations
 │   └── index.ts          # State API + verification
@@ -1172,24 +1325,30 @@ src/
 │   ├── index.ts          # Transactional orchestrator with backup/rollback
 │   └── context.ts        # Builds rich context for post-upgrade planning
 ├── workflow/             # Workflow engine
-│   ├── consensus.ts      # Consensus loop
-│   ├── plan-mode.ts      # Planning phase (monorepo-aware context scanning)
+│   ├── consensus.ts      # Consensus loop (reviewerPersona threading)
+│   ├── plan-mode.ts      # Planning phase (strategy generation, monorepo-aware)
 │   ├── execution-mode.ts # Execution phase
 │   ├── milestone-workflow.ts
 │   ├── task-workflow.ts  # Uses isWorkspace() for multi-app checks
 │   ├── test-runner.ts    # Test execution
-│   ├── workflow-logger.ts # Persistent logging
+│   ├── workflow-logger.ts # Persistent logging (website-strategy stage)
 │   ├── plan-storage.ts   # Consensus docs storage (per-app feedback)
 │   ├── workspace-manager.ts # Multi-app workspace management
+│   ├── website-strategy.ts  # AI strategy generation, caching, staleness detection
+│   ├── website-updater.ts   # Post-plan content refresh with strategy context
+│   ├── overview.ts       # Project overview with progress and analysis
 │   ├── ui-designer.ts    # AI-powered UI design generation
 │   ├── ui-setup.ts       # Tailwind/shadcn setup automation
 │   ├── ui-verification.ts # UI setup verification
 │   ├── project-verification.ts # Project quality checks
-│   └── auto-fix.ts       # Automatic error fixing
+│   ├── project-structure.ts    # Project directory scanner
+│   ├── remediation.ts    # Consensus-driven failure recovery
+│   └── auto-fix.ts       # Automatic error fixing (enhanced ENOENT tracking)
 └── types/                # TypeScript types
     ├── project.ts        # OutputLanguage, isWorkspace(), flexible OpenAIModelSchema
-    ├── workflow.ts       # ProjectStateSchema (uses OutputLanguageSchema)
-    └── consensus.ts      # GeminiModelSchema, GrokModelSchema, KNOWN_GEMINI_MODELS
+    ├── workflow.ts       # ProjectStateSchema (websiteStrategy field)
+    ├── consensus.ts      # GeminiModelSchema, GrokModelSchema, reviewerPersona
+    └── website-strategy.ts # WebsiteStrategyDocument, BrandAssetsContract, DesignTokens
 ```
 
 ## Development

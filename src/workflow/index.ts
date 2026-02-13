@@ -50,6 +50,9 @@ export * from './task-workflow.js';
 export * from './milestone-workflow.js';
 export * from './plan-storage.js';
 export * from './workspace-manager.js';
+export * from './website-updater.js';
+export * from './website-strategy.js';
+export * from './overview.js';
 
 /**
  * Workflow options
@@ -114,6 +117,17 @@ export async function runWorkflow(
         planResult,
         error: planResult.error || 'Plan mode failed to reach consensus',
       };
+    }
+
+    // Post-plan: Update website content with project context
+    if (spec.language === 'website' || spec.language === 'all' || spec.language === 'fullstack') {
+      try {
+        onProgress?.('website-update', 'Updating website with project context...');
+        const { updateWebsiteContent } = await import('./website-updater.js');
+        await updateWebsiteContent(projectDir, planResult.state, spec.language, (msg) => onProgress?.('website-update', msg));
+      } catch {
+        // Non-blocking: website content update failure should not stop workflow
+      }
     }
 
     // Phase 2: Execution Mode
@@ -222,6 +236,17 @@ export async function resumeWorkflow(
             planResult,
             error: planResult.error || 'Plan mode failed to reach consensus',
           };
+        }
+
+        // Post-plan: Update website content with project context
+        if (state.language === 'website' || state.language === 'all' || state.language === 'fullstack') {
+          try {
+            onProgress?.('website-update', 'Updating website with project context...');
+            const { updateWebsiteContent } = await import('./website-updater.js');
+            await updateWebsiteContent(projectDir, planResult.state, state.language, (msg) => onProgress?.('website-update', msg));
+          } catch {
+            // Non-blocking
+          }
         }
 
         // Continue to execution
