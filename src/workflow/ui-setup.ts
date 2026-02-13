@@ -418,10 +418,11 @@ export async function setupUI(
     theme?: string;
     projectType?: string;
     idea?: string;
+    frontendDir?: string;
   } = {},
   onProgress?: (message: string) => void
 ): Promise<UISetupResult> {
-  const frontendDir = path.join(projectDir, 'packages', 'frontend');
+  const frontendDir = options.frontendDir || path.join(projectDir, 'packages', 'frontend');
   const componentsInstalled: string[] = [];
 
   try {

@@ -773,6 +773,7 @@ export async function runExecutionMode(
           {
             theme: uiSpec?.themeName || 'modern',
             idea: state.idea,
+            frontendDir: uiPaths.frontendDir || undefined,
           },
           (msg) => onProgress?.('ui-setup', msg)
         );

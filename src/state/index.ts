@@ -983,9 +983,10 @@ export async function verifyCodeImplementation(projectDir: string): Promise<Code
         );
         totalLinesOfCode += lines.length;
 
-        // Check if this is a main entry point
+        // Check if this is a main entry point (only flag the first one found,
+        // not every index.ts barrel file in a monorepo)
         const basename = path.basename(file);
-        if (mainEntryNames.includes(basename)) {
+        if (!hasMainEntryPoint && mainEntryNames.includes(basename)) {
           hasMainEntryPoint = true;
           mainEntryPointLines = lines.length;
 
