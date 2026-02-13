@@ -7,7 +7,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { parseErrorFilePaths, analyzeFileExistence } from '../../src/workflow/execution-mode.js';
-import { parseTypeScriptErrors } from '../../src/workflow/auto-fix.js';
+import { parseTypeScriptErrors, resolveErrorFilePath } from '../../src/workflow/auto-fix.js';
 
 let tempDir: string;
 
@@ -311,6 +311,66 @@ npm ERR! Exit status 1`;
 
   it('should return empty array for empty output', () => {
     expect(parseTypeScriptErrors('')).toHaveLength(0);
+  });
+});
+
+describe('resolveErrorFilePath (workspace path resolution)', () => {
+  it('should find file at project root for non-workspace language', async () => {
+    await fs.writeFile(path.join(tempDir, 'vite.config.ts'), 'export default {}');
+
+    const result = await resolveErrorFilePath('vite.config.ts', tempDir, 'typescript');
+    expect(result).toBe(path.join(tempDir, 'vite.config.ts'));
+  });
+
+  it('should return root path for non-workspace language even when file is missing', async () => {
+    const result = await resolveErrorFilePath('vite.config.ts', tempDir, 'typescript');
+    expect(result).toBe(path.join(tempDir, 'vite.config.ts'));
+  });
+
+  it('should find file in apps/frontend for fullstack when not at root', async () => {
+    await fs.mkdir(path.join(tempDir, 'apps', 'frontend'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'apps', 'frontend', 'vite.config.ts'), 'export default {}');
+
+    const result = await resolveErrorFilePath('vite.config.ts', tempDir, 'fullstack');
+    expect(result).toBe(path.join(tempDir, 'apps', 'frontend', 'vite.config.ts'));
+  });
+
+  it('should find file in apps/backend for "all" language', async () => {
+    await fs.mkdir(path.join(tempDir, 'apps', 'backend'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'apps', 'backend', 'vitest.config.ts'), 'export default {}');
+
+    const result = await resolveErrorFilePath('vitest.config.ts', tempDir, 'all');
+    expect(result).toBe(path.join(tempDir, 'apps', 'backend', 'vitest.config.ts'));
+  });
+
+  it('should prefer project root if file exists there for workspace', async () => {
+    await fs.writeFile(path.join(tempDir, 'tsconfig.json'), '{}');
+    await fs.mkdir(path.join(tempDir, 'apps', 'frontend'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'apps', 'frontend', 'tsconfig.json'), '{}');
+
+    const result = await resolveErrorFilePath('tsconfig.json', tempDir, 'fullstack');
+    expect(result).toBe(path.join(tempDir, 'tsconfig.json'));
+  });
+
+  it('should search packages/ fallback for workspace', async () => {
+    await fs.mkdir(path.join(tempDir, 'packages', 'frontend'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'packages', 'frontend', 'vite.config.ts'), 'export default {}');
+
+    const result = await resolveErrorFilePath('vite.config.ts', tempDir, 'fullstack');
+    expect(result).toBe(path.join(tempDir, 'packages', 'frontend', 'vite.config.ts'));
+  });
+
+  it('should resolve relative paths with subdirs (e.g. src/App.tsx)', async () => {
+    await fs.mkdir(path.join(tempDir, 'apps', 'frontend', 'src'), { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'apps', 'frontend', 'src', 'App.tsx'), 'export default {}');
+
+    const result = await resolveErrorFilePath('src/App.tsx', tempDir, 'fullstack');
+    expect(result).toBe(path.join(tempDir, 'apps', 'frontend', 'src', 'App.tsx'));
+  });
+
+  it('should return root fallback when file not found anywhere in workspace', async () => {
+    const result = await resolveErrorFilePath('nonexistent.ts', tempDir, 'fullstack');
+    expect(result).toBe(path.join(tempDir, 'nonexistent.ts'));
   });
 });
 

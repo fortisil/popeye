@@ -6,6 +6,59 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { executePrompt } from '../adapters/claude.js';
+import { isWorkspace, type OutputLanguage } from '../types/project.js';
+
+/** Standard workspace subdirectories to search when a file isn't at the root */
+const WORKSPACE_SUBDIRS = ['apps/frontend', 'apps/backend', 'apps/website', 'packages/frontend', 'packages/backend'];
+
+/**
+ * Resolve a (possibly relative) error file path to an absolute path that exists on disk.
+ * For workspace projects, if the file doesn't exist at the project root, searches
+ * workspace subdirectories (apps/frontend, apps/backend, etc.).
+ */
+export async function resolveErrorFilePath(
+  filePath: string,
+  projectDir: string,
+  language: string,
+): Promise<string> {
+  // If already absolute and exists, use it directly
+  if (path.isAbsolute(filePath)) {
+    try {
+      await fs.access(filePath);
+      return filePath;
+    } catch {
+      // Absolute path doesn't exist — for workspace projects, try searching subdirs
+      if (!isWorkspace(language as OutputLanguage)) return filePath;
+      const basename = path.basename(filePath);
+      for (const subdir of WORKSPACE_SUBDIRS) {
+        const candidate = path.join(projectDir, subdir, basename);
+        try {
+          await fs.access(candidate);
+          return candidate;
+        } catch { /* continue */ }
+      }
+      return filePath;
+    }
+  }
+
+  // Relative path: try at project root first
+  const rootPath = path.join(projectDir, filePath);
+  try {
+    await fs.access(rootPath);
+    return rootPath;
+  } catch {
+    // Not at root — for workspace projects, search subdirs
+    if (!isWorkspace(language as OutputLanguage)) return rootPath;
+    for (const subdir of WORKSPACE_SUBDIRS) {
+      const candidate = path.join(projectDir, subdir, filePath);
+      try {
+        await fs.access(candidate);
+        return candidate;
+      } catch { /* continue */ }
+    }
+    return rootPath;
+  }
+}
 
 /**
  * Build error details
@@ -180,7 +233,8 @@ export async function autoFixTypeScriptErrors(
   projectDir: string,
   buildOutput: string,
   maxAttempts: number = 3,
-  onProgress?: (message: string) => void
+  onProgress?: (message: string) => void,
+  language: string = 'typescript',
 ): Promise<AutoFixResult> {
   const fixes: Array<{ file: string; description: string }> = [];
   let attempts = 0;
@@ -237,7 +291,7 @@ export async function autoFixTypeScriptErrors(
 
     // Fix each file
     for (const [filePath, fileErrors] of errorsByFile) {
-      const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(projectDir, filePath);
+      const absolutePath = await resolveErrorFilePath(filePath, projectDir, language);
 
       try {
         // Read current file content
@@ -401,7 +455,7 @@ export async function buildWithAutoFix(
 
     // Try auto-fix for TypeScript-based projects (includes fullstack, website, all)
     if (isTypeScriptBased) {
-      const fixResult = await autoFixTypeScriptErrors(projectDir, output, maxAttempts, onProgress);
+      const fixResult = await autoFixTypeScriptErrors(projectDir, output, maxAttempts, onProgress, language);
 
       // Log structural issue if detected
       if (fixResult.isStructuralIssue) {
