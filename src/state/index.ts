@@ -679,8 +679,14 @@ export async function analyzeProjectProgress(projectDir: string): Promise<Projec
     );
   });
 
-  // Check for plan mismatch - plan has significantly more tasks than state
-  const planMismatch = planTaskCount > 0 && planTaskCount > totalTasks * 1.5;
+  // Check for plan mismatch - plan has significantly more tasks than state.
+  // However, after an upgrade the plan file may contain stale tasks from the
+  // previous project scope. If all current state tasks are already complete,
+  // the plan file is outdated and should not block completion.
+  const allStateTasksComplete = totalTasks > 0 && completedTasks === totalTasks;
+  const planMismatch = planTaskCount > 0 &&
+    planTaskCount > totalTasks * 1.5 &&
+    !allStateTasksComplete; // Reason: post-upgrade plan file may contain old tasks
 
   // Calculate percentage - use plan task count if we have more tasks in plan
   const effectiveTotal = planMismatch ? planTaskCount : totalTasks;
