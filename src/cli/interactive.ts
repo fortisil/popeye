@@ -2262,10 +2262,99 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
 }
 
 /**
- * Generate a meaningful project name from an idea
- * Extracts key nouns and creates a kebab-case name
+ * Directories that are too generic to use as project names.
+ * If the CWD basename matches one of these, we skip CWD-based naming.
  */
-function generateProjectName(idea: string): string {
+const GENERIC_DIR_NAMES = new Set([
+  'home', 'desktop', 'documents', 'downloads', 'projects', 'project',
+  'repos', 'code', 'dev', 'workspace', 'workspaces', 'src', 'tmp',
+  'temp', 'users', 'user', 'root', 'var', 'opt',
+]);
+
+/**
+ * Try to extract a product name from .md files in a directory.
+ * Looks for top-level headings (# ProductName) in markdown files.
+ *
+ * @param dir - Directory to scan for .md files
+ * @returns Product name if found, null otherwise
+ */
+export async function extractNameFromDocs(dir: string): Promise<string | null> {
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const mdFiles = entries
+      .filter(e => e.isFile() && e.name.endsWith('.md') && !e.name.toLowerCase().startsWith('readme'))
+      .map(e => path.join(dir, e.name));
+
+    for (const mdFile of mdFiles) {
+      try {
+        const content = await fs.readFile(mdFile, 'utf-8');
+        // Look for a top-level heading like "# Gateco" or "# Gateco - Subtitle"
+        const headingMatch = content.match(/^#\s+([A-Z][a-zA-Z0-9]+)/m);
+        if (headingMatch && headingMatch[1]) {
+          const name = headingMatch[1];
+          // Validate: must be a reasonable product name (3-30 chars, not a generic word)
+          if (name.length >= 3 && name.length <= 30 && !GENERIC_DIR_NAMES.has(name.toLowerCase())) {
+            return name;
+          }
+        }
+      } catch {
+        // Skip unreadable files
+      }
+    }
+  } catch {
+    // Directory not readable
+  }
+  return null;
+}
+
+/**
+ * Generate a meaningful project name from an idea, with CWD-aware logic.
+ *
+ * Priority chain:
+ * 1. If CWD contains .md docs with a "# ProductName" heading, use that
+ * 2. If CWD basename is a meaningful name (not generic), use it
+ * 3. Fall back to extracting a name from the idea text
+ *
+ * @param idea - The user's project idea text
+ * @param cwd - Optional current working directory for context-aware naming
+ * @returns A kebab-case project name
+ */
+export async function generateProjectName(idea: string, cwd?: string): Promise<string> {
+  // Normalize to kebab-case helper
+  const toKebab = (name: string): string =>
+    name
+      .replace(/([a-z])([A-Z])/g, '$1-$2')
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+  if (cwd) {
+    // Priority 1: Check for doc-derived name in CWD
+    const docName = await extractNameFromDocs(cwd);
+    if (docName) {
+      return toKebab(docName);
+    }
+
+    // Priority 2: Use CWD basename if it's meaningful
+    const dirName = path.basename(cwd);
+    if (dirName.length >= 3 && !GENERIC_DIR_NAMES.has(dirName.toLowerCase())) {
+      return toKebab(dirName);
+    }
+  }
+
+  // Priority 3: Extract from idea text (original logic)
+  return generateProjectNameFromIdea(idea);
+}
+
+/**
+ * Extract a project name from the idea text alone.
+ * This is the original generateProjectName logic, used as a fallback.
+ *
+ * @param idea - The user's project idea text
+ * @returns A kebab-case project name
+ */
+export function generateProjectNameFromIdea(idea: string): string {
   // 1. First, try to find explicit project name patterns
   const explicitPatterns = [
     /(?:called|named|for|planning|project)\s+["']?([A-Z][a-zA-Z0-9]+)["']?/i,
@@ -2465,8 +2554,8 @@ async function handleIdea(idea: string, state: SessionState): Promise<void> {
     }
   }
 
-  // Generate a meaningful project name
-  const projectName = generateProjectName(idea);
+  // Generate a meaningful project name (CWD-aware: checks docs and dir name first)
+  const projectName = await generateProjectName(idea, cwd);
   const projectDir = path.join(cwd, projectName);
 
   console.log();
@@ -2581,8 +2670,8 @@ async function handleNewProject(idea: string, state: SessionState): Promise<void
 
   const cwd = state.projectDir || process.cwd();
 
-  // Generate a meaningful project name
-  const projectName = generateProjectName(idea);
+  // Generate a meaningful project name (CWD-aware: checks docs and dir name first)
+  const projectName = await generateProjectName(idea, cwd);
   const projectDir = path.join(cwd, projectName);
 
   console.log();

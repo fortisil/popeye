@@ -7,6 +7,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { executePrompt } from '../adapters/claude.js';
 import { isWorkspace, type OutputLanguage } from '../types/project.js';
+import { parseBundlerErrors, fixBundlerErrors } from './auto-fix-bundler.js';
 
 /** Standard workspace subdirectories to search when a file isn't at the root */
 const WORKSPACE_SUBDIRS = ['apps/frontend', 'apps/backend', 'apps/website', 'packages/frontend', 'packages/backend'];
@@ -250,10 +251,17 @@ export async function autoFixTypeScriptErrors(
 
     if (errors.length === 0) {
       // First attempt with zero parsed errors and no prior fixes: the build failed
-      // but we can't parse the error format. This is NOT success.
+      // but we can't parse the error format. Try bundler error parser as fallback.
       const noParsedOnFirstAttempt = attempts === 1 && fixes.length === 0;
       if (noParsedOnFirstAttempt) {
-        onProgress?.('No parseable TypeScript errors in build output (may be bundler/non-TS errors)');
+        // Fallback: try parsing CSS/PostCSS/Tailwind/webpack bundler errors
+        const bundlerErrors = parseBundlerErrors(currentOutput);
+        if (bundlerErrors.length > 0) {
+          onProgress?.(`Found ${bundlerErrors.length} bundler/CSS error(s), attempting fix...`);
+          return fixBundlerErrors(projectDir, currentOutput, bundlerErrors, language, onProgress);
+        }
+
+        onProgress?.('No parseable errors in build output (not TS or bundler format)');
         return {
           success: false,
           fixedErrors: 0,
@@ -264,7 +272,7 @@ export async function autoFixTypeScriptErrors(
           totalErrorFiles: 0,
           isStructuralIssue: false,
           missingFiles: [],
-          error: 'Build failed but no parseable TypeScript errors found in output',
+          error: 'Build failed but no parseable errors found in output',
         };
       }
 

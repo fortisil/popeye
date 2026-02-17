@@ -201,6 +201,10 @@ export interface ProjectState {
   };
   /** Path to website strategy JSON file (relative to .popeye/) */
   websiteStrategy?: string;
+  /** Error message from website strategy generation (for visibility) */
+  strategyError?: string;
+  /** Absolute paths to discovered source documentation files */
+  sourceDocPaths?: string[];
 }
 
 /**
@@ -244,6 +248,8 @@ export const ProjectStateSchema = z.object({
     primaryColor: z.string().optional(),
   }).optional(),
   websiteStrategy: z.string().optional(),
+  strategyError: z.string().optional(),
+  sourceDocPaths: z.array(z.string()).optional(),
 });
 
 /**

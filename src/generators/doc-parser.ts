@@ -24,34 +24,84 @@ export function stripCodeFences(text: string): string {
 
 /**
  * Extract the real product name from docs or specification
- * Finds all "# Name — tagline" headings and picks the shortest (most likely the product name)
+ *
+ * Priority chain (first match wins):
+ * 1. Parsed docs: "# ProductName -- tagline" heading (picks shortest)
+ * 2. Specification: "# ProductName" heading
+ * 3. Specification: "Product:" / "Name:" / "App:" label
+ * 4. package.json "name" field from workspace root (passed via specification context)
+ * 5. undefined (caller falls back to directory name)
  */
-export function extractProductName(docs: string, specification?: string): string | undefined {
-  // Collect all "# Name — tagline" headings, pick the shortest name
+export function extractProductName(
+  docs: string,
+  specification?: string,
+  packageJsonName?: string
+): string | undefined {
+  // 1. Collect all "# Name -- tagline" headings, pick the shortest name
   // Reason: sub-documents like "Gateco UI Color System" are longer than "Gateco"
-  const headingPattern = /^#\s+([A-Z][a-zA-Z0-9]+(?:[ \t]+[A-Z][a-zA-Z0-9]+)*)(?:[ \t]*[—\-–|:][ \t])/gm;
+  const headingPattern = /^#\s+([A-Z][a-zA-Z0-9]+(?:[ \t]+[A-Z][a-zA-Z0-9]+)*)(?:[ \t]*(?:--|[—–|:])[ \t])/gm;
   const candidates: string[] = [];
   let match;
   while ((match = headingPattern.exec(docs)) !== null) {
     candidates.push(match[1].trim());
   }
   if (candidates.length > 0) {
-    // Prefer shortest name (product name is typically 1-2 words)
     candidates.sort((a, b) => a.length - b.length);
     return candidates[0];
   }
 
-  // Pattern: "**Project Name**: ProductName" in specification
+  // 2. "# ProductName" heading in specification (standalone heading, not sub-doc)
+  // Reason: Exclude common section headings like "Overview", "Introduction", "Summary"
+  if (specification) {
+    const commonHeadings = /^(Overview|Introduction|Summary|Features|Architecture|Requirements|Setup|Installation|Configuration|Specification|Appendix|Conclusion|References)$/i;
+    const specHeading = specification.match(/^#\s+([A-Z][a-zA-Z0-9]+(?:\s+[A-Z][a-zA-Z0-9]+)*)\s*$/m);
+    if (specHeading && !commonHeadings.test(specHeading[1].trim())) {
+      return specHeading[1].trim();
+    }
+  }
+
+  // 3. "Product:" / "Name:" / "App:" label in specification
   if (specification) {
     const nameMatch = specification.match(/\*\*Project\s+Name\*\*:\s*(.+)/i);
     if (nameMatch) return nameMatch[1].trim();
+
+    const labelMatch = specification.match(/(?:^|\n)\s*(?:Product|Name|App)\s*:\s*(.+)/i);
+    if (labelMatch) {
+      const value = labelMatch[1].trim().replace(/\*\*/g, '');
+      if (value.length > 0 && value.length < 60) return value;
+    }
   }
 
-  // Pattern: "# ProductName" in spec/product doc sections only
+  // 4. "# ProductName" in spec/product doc sections only
   const sectionHeading = docs.match(/^---\s+\S*(?:spec|product)\S*\s+---\n#\s+([A-Z][a-zA-Z0-9]+)/im);
   if (sectionHeading) return sectionHeading[1].trim();
 
+  // 5. package.json name (strip @scope/ prefix and convert to title case)
+  if (packageJsonName) {
+    const cleaned = packageJsonName
+      .replace(/^@[^/]+\//, '') // Strip scope
+      .replace(/[-_]/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+      .trim();
+    if (cleaned.length > 0) return cleaned;
+  }
+
   return undefined;
+}
+
+/**
+ * Check if a product name looks like a directory name rather than a real product name
+ * Used by the quality gate to flag suspicious names
+ *
+ * @param name - The product name to check
+ * @returns True if the name looks suspicious (likely a directory name)
+ */
+export function isSuspiciousProductName(name: string): boolean {
+  const suspiciousNames = ['my-app', 'my-project', 'project', 'app', 'website', 'frontend'];
+  if (suspiciousNames.includes(name.toLowerCase())) return true;
+  // Hyphenated lowercase strings like "read-all-files" are likely directory names
+  if (/^[a-z]+-[a-z]+(-[a-z]+)*$/.test(name)) return true;
+  return false;
 }
 
 /**
@@ -123,16 +173,37 @@ export function extractDescription(docs: string, specification?: string): string
   return undefined;
 }
 
+/** Regex to filter out dev-task items that aren't real product features */
+const DEV_TASK_VERBS = /^(?:implement|fix|refactor|add tests|upgrade|migrate|configure|setup|install|deploy|debug|create|build|write|update|remove|delete)/i;
+
 /**
  * Extract features from docs and specification
- * Looks for bullet/numbered lists in sections about features, principles, capabilities
+ * Docs-first: extracts from docs only; falls back to specification if empty
+ * Filters out dev-task items (implement, fix, refactor, etc.)
  */
 export function extractFeatures(
   docs: string,
   specification?: string
 ): Array<{ title: string; description: string }> {
+  // Docs-first: try docs only, then fall back to spec
+  // Reason: specification often contains dev tasks, not user-facing features
+  const docsFeatures = extractFeaturesFromSource(docs);
+  if (docsFeatures.length > 0) return docsFeatures;
+
+  if (specification) {
+    return extractFeaturesFromSource(specification);
+  }
+
+  return [];
+}
+
+/**
+ * Extract features from a single text source
+ */
+function extractFeaturesFromSource(
+  source: string
+): Array<{ title: string; description: string }> {
   const features: Array<{ title: string; description: string }> = [];
-  const source = docs + '\n' + (specification || '');
 
   // Split into sections by heading
   const sectionPattern = /^#{1,3}\s+(.+)$/gm;
@@ -173,13 +244,17 @@ export function extractFeatures(
       // Try "**bold title** - description" pattern
       const boldWithDesc = text.match(/^\*\*(.+?)\*\*\s*[-–:]\s*(.+)/);
       if (boldWithDesc) {
+        const title = boldWithDesc[1].trim();
+        // Filter out dev-task items
+        if (DEV_TASK_VERBS.test(title)) continue;
         features.push({
-          title: boldWithDesc[1].trim(),
+          title,
           description: boldWithDesc[2].trim().slice(0, 150),
         });
       } else if (/^\*\*.+\*\*/.test(text)) {
         // Bold title with no trailing description: "**Vector DB agnostic**"
         const title = text.replace(/\*\*/g, '').trim();
+        if (DEV_TASK_VERBS.test(title)) continue;
         if (title.length > 3 && title.length < 80) {
           features.push({ title, description: title });
         }
@@ -187,6 +262,8 @@ export function extractFeatures(
         const cleaned = text.replace(/\*\*/g, '');
         // Split on sentence-level delimiters only; keep hyphens in compound words
         const titlePart = cleaned.split(/[.,:;—–]/)[0].trim();
+        // Filter out dev-task items
+        if (DEV_TASK_VERBS.test(titlePart)) continue;
         if (titlePart.length > 3 && titlePart.length < 60) {
           features.push({
             title: titlePart,

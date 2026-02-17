@@ -67,7 +67,7 @@ describe('generateWebsiteHeader', () => {
   it('renders text fallback when no logo', () => {
     const header = generateWebsiteHeader('deploy-ai', contextNoLogo, mockStrategy);
     expect(header).toContain('DeployAI');
-    expect(header).toContain('font-bold text-primary-600');
+    expect(header).toContain('font-bold text-foreground');
   });
 
   it('includes navigation links from strategy', () => {

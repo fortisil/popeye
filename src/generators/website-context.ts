@@ -15,7 +15,11 @@ import {
   extractPricing,
   extractPrimaryColor,
 } from './doc-parser.js';
+import { getScanDirectories } from './workspace-root.js';
 import type { WebsiteStrategyDocument, BrandAssetsContract } from '../types/website-strategy.js';
+
+/** Per-file character cap to prevent a single large doc from consuming the budget */
+const PER_FILE_CAP = 8000;
 
 /**
  * Structured content context for website generation
@@ -48,7 +52,8 @@ export interface WebsiteContentContext {
 
 /**
  * Resolve brand assets into a deterministic contract
- * Searches for logo/favicon in project directory, sets canonical output paths
+ * Searches for logo/favicon in project directory and workspace root,
+ * sets canonical output paths
  *
  * @param cwd - Directory to scan for brand assets
  * @param brandContext - Optional existing brand context from state
@@ -103,10 +108,53 @@ const EXCLUDED_DIRS = [
  * @returns Array of absolute paths to discovered doc files
  */
 export async function discoverProjectDocs(cwd: string): Promise<string[]> {
+  const scanDirs = await getScanDirectories(cwd);
+  const allDocs: string[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const dir of scanDirs) {
+    const found = await scanDirectoryForDocs(dir);
+    for (const docPath of found) {
+      const resolved = path.resolve(docPath);
+      if (!seenPaths.has(resolved)) {
+        seenPaths.add(resolved);
+        allDocs.push(resolved);
+      }
+    }
+  }
+
+  // Sort: brand/color docs first, then spec, then pricing, then others
+  // Reason: ensures critical brand context isn't truncated by the maxLength cap
+  allDocs.sort((a, b) => {
+    const nameA = path.basename(a).toLowerCase();
+    const nameB = path.basename(b).toLowerCase();
+    const priorityA = getDocPriority(nameA);
+    const priorityB = getDocPriority(nameB);
+    return priorityA - priorityB;
+  });
+
+  return allDocs;
+}
+
+/**
+ * Get sort priority for a doc file (lower = higher priority)
+ */
+function getDocPriority(fileName: string): number {
+  if (/color|brand/.test(fileName)) return 0;
+  if (/spec/.test(fileName)) return 1;
+  if (/pricing/.test(fileName)) return 2;
+  if (/feature/.test(fileName)) return 3;
+  return 4;
+}
+
+/**
+ * Scan a single directory for doc files (flat + docs/ subdirectory)
+ */
+async function scanDirectoryForDocs(dir: string): Promise<string[]> {
   const docs: string[] = [];
 
   try {
-    const entries = await fs.readdir(cwd, { withFileTypes: true });
+    const entries = await fs.readdir(dir, { withFileTypes: true });
 
     for (const entry of entries) {
       if (entry.isDirectory() && EXCLUDED_DIRS.includes(entry.name)) {
@@ -116,19 +164,19 @@ export async function discoverProjectDocs(cwd: string): Promise<string[]> {
       if (entry.isFile() && entry.name.endsWith('.md')) {
         const matches = DOC_PATTERNS.some((pattern) => pattern.test(entry.name));
         if (matches) {
-          docs.push(path.join(cwd, entry.name));
+          docs.push(path.join(dir, entry.name));
         }
       }
 
       // Check one level of subdirectories (e.g., docs/)
       if (entry.isDirectory() && entry.name === 'docs') {
         try {
-          const subEntries = await fs.readdir(path.join(cwd, entry.name), {
+          const subEntries = await fs.readdir(path.join(dir, entry.name), {
             withFileTypes: true,
           });
           for (const subEntry of subEntries) {
             if (subEntry.isFile() && subEntry.name.endsWith('.md')) {
-              docs.push(path.join(cwd, entry.name, subEntry.name));
+              docs.push(path.join(dir, entry.name, subEntry.name));
             }
           }
         } catch {
@@ -140,21 +188,12 @@ export async function discoverProjectDocs(cwd: string): Promise<string[]> {
     // Directory not accessible
   }
 
-  // Sort: color/brand docs first (small but critical), then others
-  // This ensures brand context isn't truncated by the maxLength cap
-  docs.sort((a, b) => {
-    const nameA = path.basename(a).toLowerCase();
-    const nameB = path.basename(b).toLowerCase();
-    const priorityA = /color|brand/.test(nameA) ? 0 : 1;
-    const priorityB = /color|brand/.test(nameB) ? 0 : 1;
-    return priorityA - priorityB;
-  });
-
   return docs;
 }
 
 /**
  * Find brand assets (logo files) in a directory
+ * Also searches workspace root and parent directories
  *
  * @param cwd - Directory to scan for brand assets
  * @returns Object with optional logoPath
@@ -162,10 +201,24 @@ export async function discoverProjectDocs(cwd: string): Promise<string[]> {
 export async function findBrandAssets(
   cwd: string
 ): Promise<{ logoPath?: string }> {
+  const scanDirs = await getScanDirectories(cwd);
+
+  for (const dir of scanDirs) {
+    const result = await scanDirectoryForLogo(dir);
+    if (result.logoPath) return result;
+  }
+
+  return {};
+}
+
+/**
+ * Scan a single directory for logo files
+ */
+async function scanDirectoryForLogo(dir: string): Promise<{ logoPath?: string }> {
   const logoExtensions = ['.png', '.svg', '.jpg', '.jpeg', '.webp'];
 
   try {
-    const entries = await fs.readdir(cwd, { withFileTypes: true });
+    const entries = await fs.readdir(dir, { withFileTypes: true });
 
     for (const entry of entries) {
       if (!entry.isFile()) continue;
@@ -175,7 +228,7 @@ export async function findBrandAssets(
       const hasValidExt = logoExtensions.some((ext) => lowerName.endsWith(ext));
 
       if (hasLogoInName && hasValidExt) {
-        return { logoPath: path.join(cwd, entry.name) };
+        return { logoPath: path.join(dir, entry.name) };
       }
     }
   } catch {
@@ -189,12 +242,12 @@ export async function findBrandAssets(
  * Read and concatenate project documentation files
  *
  * @param docPaths - Array of absolute paths to doc files
- * @param maxLength - Maximum combined length (default 15000 chars)
+ * @param maxLength - Maximum combined length (default 25000 chars)
  * @returns Combined documentation content with file headers
  */
 export async function readProjectDocs(
   docPaths: string[],
-  maxLength: number = 15000
+  maxLength: number = 25000
 ): Promise<string> {
   const sections: string[] = [];
   let totalLength = 0;
@@ -203,9 +256,15 @@ export async function readProjectDocs(
     if (totalLength >= maxLength) break;
 
     try {
-      const content = await fs.readFile(docPath, 'utf-8');
+      let content = await fs.readFile(docPath, 'utf-8');
       const fileName = path.basename(docPath);
       const header = `--- ${fileName} ---`;
+
+      // Per-file cap to prevent a single large doc from consuming the budget
+      if (content.length > PER_FILE_CAP) {
+        content = content.slice(0, PER_FILE_CAP) + '...';
+      }
+
       const remaining = maxLength - totalLength;
       const trimmedContent =
         content.length > remaining ? content.slice(0, remaining) + '...' : content;
@@ -263,3 +322,172 @@ export async function buildWebsiteContext(
   return context;
 }
 
+/**
+ * Result of soft (non-throwing) website context validation
+ */
+export interface ValidationResult {
+  /** Whether the context is sufficient for generation (no blocking issues) */
+  passed: boolean;
+  /** Blocking problems that prevent quality generation */
+  issues: string[];
+  /** Non-blocking concerns about content quality */
+  warnings: string[];
+  /** Content quality score 0-100, deducted for each default/missing piece */
+  contentScore: number;
+}
+
+/** Default pricing tier names that indicate placeholder content */
+const DEFAULT_PRICING_NAMES = ['starter', 'free', 'pro', 'enterprise'];
+
+/** Default pricing amounts that indicate placeholder content */
+const DEFAULT_PRICING_AMOUNTS = ['$0', '$29', '$99', 'custom', 'free'];
+
+/**
+ * Validate website content context without throwing
+ * Returns structured result with issues, warnings, and a content quality score
+ *
+ * @param context - The built website content context
+ * @param projectName - The project name for validation
+ * @returns Validation result with issues, warnings, and score
+ */
+export function validateWebsiteContext(
+  context: WebsiteContentContext,
+  _projectName: string
+): ValidationResult {
+  const issues: string[] = [];
+  const warnings: string[] = [];
+  let contentScore = 100;
+
+  // Suspicious product name (looks like a directory name with hyphens/underscores)
+  const suspiciousNames = ['my-app', 'my-project', 'project', 'app', 'website', 'frontend'];
+  if (
+    /^[a-z]+-[a-z]+(-[a-z]+)*$/.test(context.productName) ||
+    suspiciousNames.includes(context.productName.toLowerCase())
+  ) {
+    issues.push(
+      `Product name "${context.productName}" looks like a directory name, not a product. ` +
+      `Provide .md docs with "# ProductName -- tagline" heading.`
+    );
+    contentScore -= 25;
+  }
+
+  // No docs found at all
+  if (!context.rawDocs || context.rawDocs.length < 100) {
+    issues.push(
+      'No project documentation found. Place .md files (spec, pricing, brand) ' +
+      'in the project directory or its parent.'
+    );
+    contentScore -= 30;
+  }
+
+  // No features extracted
+  if (context.features.length === 0) {
+    issues.push(
+      'No product features extracted from docs. Add a "## Features" section to your spec.'
+    );
+    contentScore -= 20;
+  }
+
+  // Strategy validation
+  if (!context.strategy) {
+    issues.push(
+      'Website strategy missing. Strategy generation may have failed or been skipped.'
+    );
+    contentScore -= 15;
+  }
+
+  // Brand color validation: brand/color docs exist but no color extracted
+  if (!context.brand?.primaryColor && context.rawDocs && /color|brand/i.test(context.rawDocs)) {
+    issues.push(
+      'Brand/color docs found but no primary color extracted. Check color doc format.'
+    );
+    contentScore -= 5;
+  }
+
+  // Logo found but output path not resolved
+  if (context.brand?.logoPath && !context.brandAssets?.logoOutputPath) {
+    issues.push(
+      'Logo found but output path not resolved. Call resolveBrandAssets().'
+    );
+    contentScore -= 5;
+  }
+
+  // --- Non-blocking warnings ---
+
+  // Default pricing tiers detection
+  if (context.pricing && context.pricing.length > 0) {
+    const tierNames = context.pricing.map((t) => t.name.toLowerCase());
+    const tierPrices = context.pricing.map((t) => t.price.toLowerCase().replace(/\/mo.*/, ''));
+    const nameMatches = tierNames.filter((n) => DEFAULT_PRICING_NAMES.includes(n));
+    const priceMatches = tierPrices.filter((p) => DEFAULT_PRICING_AMOUNTS.includes(p));
+
+    // Reason: if most tier names AND prices match defaults, it's likely placeholder content
+    if (nameMatches.length >= 2 && priceMatches.length >= 2) {
+      warnings.push(
+        'Pricing tiers appear to use default values (Starter/Pro/Enterprise at $0/$29/Custom). ' +
+        'Add a pricing section to your docs for accurate tiers.'
+      );
+      contentScore -= 10;
+    }
+  }
+
+  // Missing tagline
+  if (!context.tagline) {
+    warnings.push(
+      'No tagline extracted from docs. Footer and meta tags will use generic defaults. ' +
+      'Add "# ProductName -- Your tagline here" to your spec.'
+    );
+    contentScore -= 5;
+  }
+
+  // Missing description
+  if (!context.description) {
+    warnings.push(
+      'No product description extracted. Meta description will use generic text.'
+    );
+    contentScore -= 5;
+  }
+
+  // No brand color at all (not just missing from color docs)
+  if (!context.brand?.primaryColor && !(context.rawDocs && /color|brand/i.test(context.rawDocs))) {
+    warnings.push(
+      'No brand color found. Website will use default color scheme.'
+    );
+    contentScore -= 5;
+  }
+
+  // Clamp score to 0-100
+  contentScore = Math.max(0, Math.min(100, contentScore));
+
+  return {
+    passed: issues.length === 0,
+    issues,
+    warnings,
+    contentScore,
+  };
+}
+
+/**
+ * Validate website content context and throw if insufficient
+ * Prevents generation of generic websites with placeholder content
+ *
+ * @param context - The built website content context
+ * @param projectName - The project name for validation
+ * @throws Error with actionable message if context is insufficient
+ */
+export function validateWebsiteContextOrThrow(
+  context: WebsiteContentContext,
+  projectName: string
+): { passed: boolean; issues: string[] } {
+  const result = validateWebsiteContext(context, projectName);
+
+  if (!result.passed) {
+    throw new Error(
+      `Website generation blocked - insufficient project context:\n` +
+      result.issues.map((i) => `  - ${i}`).join('\n') +
+      `\n\nFix these issues and re-run. Use POPEYE_DEBUG_WEBSITE=1 to see discovery details.`
+    );
+  }
+
+  return { passed: true, issues: [] };
+}

@@ -21,6 +21,10 @@ import {
   generateRootDockerCompose,
 } from '../generators/templates/fullstack.js';
 import { loadState, saveState } from '../state/persistence.js';
+import { buildWebsiteContext, resolveBrandAssets, validateWebsiteContext } from '../generators/website-context.js';
+import type { WebsiteContentContext } from '../generators/website-context.js';
+import { resolveWorkspaceRoot } from '../generators/workspace-root.js';
+import { loadWebsiteStrategy } from '../workflow/website-strategy.js';
 import type { UpgradeResult } from './index.js';
 
 /**
@@ -39,6 +43,57 @@ async function pathExists(filePath: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Build website content context from user docs, brand assets, and strategy
+ *
+ * Replicates the context-building pattern from website-updater.ts so that
+ * upgrade-generated websites get real content instead of TODO placeholders.
+ *
+ * @param projectDir - Project directory (workspace root)
+ * @param projectName - Project name
+ * @returns Content context and optional warning
+ */
+export async function buildUpgradeContentContext(
+  projectDir: string,
+  projectName: string,
+): Promise<{ context?: WebsiteContentContext; warning?: string }> {
+  try {
+    // Build context from user docs (scans projectDir + parent via getScanDirectories)
+    const context = await buildWebsiteContext(projectDir, projectName);
+
+    // Apply brand context from state if available
+    const state = await loadState(projectDir);
+    if (state?.brandContext?.primaryColor) {
+      context.brand = { ...context.brand, primaryColor: state.brandContext.primaryColor };
+    }
+    if (state?.brandContext?.logoPath) {
+      context.brand = { ...context.brand, logoPath: state.brandContext.logoPath };
+    }
+
+    // Resolve brand assets using workspace root
+    const workspaceRoot = await resolveWorkspaceRoot(projectDir);
+    context.brandAssets = await resolveBrandAssets(workspaceRoot, context.brand);
+
+    // Load website strategy if available
+    const strategyData = await loadWebsiteStrategy(projectDir);
+    if (strategyData) {
+      context.strategy = strategyData.strategy;
+    }
+
+    // Soft validation: include quality warnings in the return value
+    const validation = validateWebsiteContext(context, projectName);
+    const validationWarnings = [...validation.issues, ...validation.warnings]
+      .map((w) => `[quality-gate] ${w}`);
+
+    return {
+      context,
+      warning: validationWarnings.length > 0 ? validationWarnings.join('; ') : undefined,
+    };
+  } catch (e) {
+    return { warning: e instanceof Error ? e.message : 'Unknown error building website context' };
   }
 }
 
@@ -297,11 +352,21 @@ export async function upgradeFullstackToAll(
       openaiModel: 'gpt-4o',
     };
 
+    // Build content context from user docs, brand assets, and strategy
+    const { context: contentContext, warning } = await buildUpgradeContentContext(
+      projectDir,
+      projectName,
+    );
+    if (warning) {
+      console.warn(`[upgrade] Website context warning: ${warning}`);
+    }
+
     const result = await generateWebsiteProject(spec, projectDir, {
       baseDir: websiteDir,
       workspaceMode: true,
       skipDocker: true,
       skipReadme: true,
+      contentContext,
     });
 
     if (!result.success) {

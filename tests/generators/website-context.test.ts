@@ -12,6 +12,8 @@ import {
   readProjectDocs,
   findBrandAssets,
   buildWebsiteContext,
+  validateWebsiteContextOrThrow,
+  type WebsiteContentContext,
 } from '../../src/generators/website-context.js';
 
 describe('discoverProjectDocs', () => {
@@ -218,5 +220,112 @@ describe('buildWebsiteContext', () => {
     expect(context.pricing![2].price).toBe('Custom');
     // Primary color is accent-primary (#2563EB), NOT bg-primary (#0F172A)
     expect(context.brand?.primaryColor).toBe('#2563EB');
+  });
+
+  it('discovers docs from parent directory via workspace root', async () => {
+    // Simulate: tmpDir has docs, tmpDir/project/.popeye/ is the project dir
+    const projectDir = path.join(tmpDir, 'project');
+    await fs.mkdir(path.join(projectDir, '.popeye'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, 'product-spec.md'),
+      '# MyProduct — A great product\n## Features\n- Feature 1'
+    );
+
+    const context = await buildWebsiteContext(projectDir, 'project');
+
+    // Should find docs from parent directory
+    expect(context.rawDocs).toContain('product-spec.md');
+    expect(context.productName).toBe('MyProduct');
+  });
+
+  it('finds brand assets from parent directory', async () => {
+    const projectDir = path.join(tmpDir, 'project');
+    await fs.mkdir(projectDir, { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'company-logo.png'), 'fake-png');
+
+    const result = await findBrandAssets(projectDir);
+
+    // findBrandAssets now scans parent dirs via workspace root
+    // The logo should be found in tmpDir
+    expect(result.logoPath).toBeDefined();
+    expect(result.logoPath).toContain('company-logo.png');
+  });
+
+  it('enforces per-file cap to prevent single large doc from consuming budget', async () => {
+    await fs.writeFile(path.join(tmpDir, 'huge-spec.md'), 'x'.repeat(20000));
+    await fs.writeFile(path.join(tmpDir, 'color-scheme.md'), '# Colors\nPrimary: #FF0000');
+
+    const docs = await discoverProjectDocs(tmpDir);
+    const content = await readProjectDocs(docs);
+
+    // Color-scheme should be present (it's prioritized and small)
+    expect(content).toContain('color-scheme.md');
+    // The huge spec should be capped at 8000 chars
+    const specSection = content.split('--- huge-spec.md ---')[1];
+    if (specSection) {
+      // Per-file cap is 8000 + "..." suffix
+      expect(specSection.length).toBeLessThan(8100);
+    }
+  });
+});
+
+describe('validateWebsiteContextOrThrow', () => {
+  const baseContext: WebsiteContentContext = {
+    productName: 'Gateco',
+    features: [{ title: 'Auth', description: 'Access control' }],
+    rawDocs: 'x'.repeat(200),
+    strategy: {
+      icp: { primaryPersona: 'devs', painPoints: [], goals: [], objections: [] },
+      positioning: { category: 'Security', differentiators: [], valueProposition: 'Secure AI', proofPoints: [] },
+      messaging: { headline: 'h', subheadline: 's', elevatorPitch: 'e', longDescription: 'l' },
+      seoStrategy: { primaryKeywords: [], secondaryKeywords: [], longTailKeywords: [], titleTemplates: {}, metaDescriptions: {} },
+      siteArchitecture: { pages: [], navigation: [], footerSections: [] },
+      conversionStrategy: { primaryCta: { text: 'Go', href: '/' }, secondaryCta: { text: 'More', href: '/' }, trustSignals: [], socialProof: [], leadCapture: 'none' },
+      competitiveContext: { category: 'sec', competitors: [], differentiators: [] },
+    },
+  };
+
+  it('passes with valid context', () => {
+    const result = validateWebsiteContextOrThrow(baseContext, 'gateco');
+    expect(result.passed).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it('fails when strategy is missing', () => {
+    const ctx: WebsiteContentContext = { ...baseContext, strategy: undefined };
+    expect(() => validateWebsiteContextOrThrow(ctx, 'gateco')).toThrow('strategy missing');
+  });
+
+  it('fails when features are empty', () => {
+    const ctx: WebsiteContentContext = { ...baseContext, features: [] };
+    expect(() => validateWebsiteContextOrThrow(ctx, 'gateco')).toThrow('features');
+  });
+
+  it('fails when product name looks like a directory', () => {
+    const ctx: WebsiteContentContext = { ...baseContext, productName: 'my-cool-project' };
+    expect(() => validateWebsiteContextOrThrow(ctx, 'x')).toThrow('directory name');
+  });
+
+  it('fails when no docs found', () => {
+    const ctx: WebsiteContentContext = { ...baseContext, rawDocs: '' };
+    expect(() => validateWebsiteContextOrThrow(ctx, 'gateco')).toThrow('documentation');
+  });
+
+  it('fails when brand/color docs exist but no color extracted', () => {
+    const ctx: WebsiteContentContext = {
+      ...baseContext,
+      rawDocs: 'x'.repeat(200) + 'color brand guide',
+      brand: undefined,
+    };
+    expect(() => validateWebsiteContextOrThrow(ctx, 'gateco')).toThrow('primary color');
+  });
+
+  it('fails when logo found but output path not resolved', () => {
+    const ctx: WebsiteContentContext = {
+      ...baseContext,
+      brand: { logoPath: '/some/logo.png' },
+      brandAssets: undefined,
+    };
+    expect(() => validateWebsiteContextOrThrow(ctx, 'gateco')).toThrow('output path not resolved');
   });
 });

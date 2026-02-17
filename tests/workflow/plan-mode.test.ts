@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parsePlanMilestones } from '../../src/workflow/plan-mode.js';
+import { parsePlanMilestones, parseTaskTag, tagToAppTarget } from '../../src/workflow/plan-mode.js';
 
 describe('parsePlanMilestones', () => {
   describe('with explicit task markers', () => {
@@ -195,6 +195,76 @@ Description: Build the main API endpoints
     });
   });
 
+  describe('app tag handling', () => {
+    it('should extract tasks with [WEB] tags', () => {
+      const plan = `
+## Milestone 1: Website Branding
+
+### Task 1.1 [WEB]: Update root layout with Gateco branding
+- **Description**: Replace default branding with Gateco colors and logo
+
+### Task 1.2 [WEB]: Create hero section component
+- **Description**: Build the landing page hero with CTA
+`;
+
+      const milestones = parsePlanMilestones(plan);
+      const allTasks = milestones.flatMap(m => m.tasks);
+
+      expect(allTasks.length).toBeGreaterThanOrEqual(2);
+      const taskNames = allTasks.map(t => t.name.toLowerCase());
+      expect(taskNames.some(n => n.includes('update root layout'))).toBe(true);
+      expect(taskNames.some(n => n.includes('create hero section'))).toBe(true);
+    });
+
+    it('should extract tasks with [INT] tags', () => {
+      const plan = `
+## Milestone 3: Integration
+
+### Task 3.1 [INT]: Wire frontend auth to backend API
+- **Description**: Connect the frontend login form to the backend auth endpoint
+
+### Task 3.2 [INT]: Set up end-to-end test suite
+- **Description**: Create E2E tests covering the full auth flow
+`;
+
+      const milestones = parsePlanMilestones(plan);
+      const allTasks = milestones.flatMap(m => m.tasks);
+
+      expect(allTasks.length).toBeGreaterThanOrEqual(2);
+      const taskNames = allTasks.map(t => t.name.toLowerCase());
+      expect(taskNames.some(n => n.includes('wire frontend auth'))).toBe(true);
+      expect(taskNames.some(n => n.includes('set up end-to-end'))).toBe(true);
+    });
+
+    it('should extract tasks with mixed app tags across milestones', () => {
+      const plan = `
+## Milestone 1: Setup
+
+### Task 1.1 [FE]: Create React component library
+- **Description**: Scaffold shared components
+
+### Task 1.2 [BE]: Implement REST API endpoints
+- **Description**: Build core API
+
+### Task 1.3 [WEB]: Build marketing landing page
+- **Description**: Create the public-facing website
+
+### Task 1.4 [INT]: Configure CI/CD pipeline
+- **Description**: Set up automated deployment
+`;
+
+      const milestones = parsePlanMilestones(plan);
+      const allTasks = milestones.flatMap(m => m.tasks);
+
+      expect(allTasks.length).toBeGreaterThanOrEqual(4);
+      const taskNames = allTasks.map(t => t.name.toLowerCase());
+      expect(taskNames.some(n => n.includes('create react component'))).toBe(true);
+      expect(taskNames.some(n => n.includes('implement rest api'))).toBe(true);
+      expect(taskNames.some(n => n.includes('build marketing landing'))).toBe(true);
+      expect(taskNames.some(n => n.includes('configure ci/cd'))).toBe(true);
+    });
+  });
+
   describe('fallback behavior', () => {
     it('should create a default milestone when no tasks found', () => {
       const plan = `
@@ -209,5 +279,45 @@ The project will do various things but no specific implementation steps are list
       // Fallback creates "Set up project structure and dependencies" as first task
       expect(milestones[0].tasks[0].name.toLowerCase()).toContain('set up');
     });
+  });
+});
+
+describe('parseTaskTag', () => {
+  it('should return WEB for [WEB] tagged tasks', () => {
+    expect(parseTaskTag('[WEB]: Update root layout')).toBe('WEB');
+    expect(parseTaskTag('[web]: Update root layout')).toBe('WEB');
+  });
+
+  it('should return FE, BE, INT for their respective tags', () => {
+    expect(parseTaskTag('[FE]: Create component')).toBe('FE');
+    expect(parseTaskTag('[BE]: Build API')).toBe('BE');
+    expect(parseTaskTag('[INT]: Wire frontend to backend')).toBe('INT');
+  });
+
+  it('should return undefined for untagged tasks', () => {
+    expect(parseTaskTag('Create component')).toBeUndefined();
+    expect(parseTaskTag('Build API endpoints')).toBeUndefined();
+  });
+
+  it('should return undefined for unknown tags', () => {
+    expect(parseTaskTag('[UNKNOWN]: Some task')).toBeUndefined();
+  });
+});
+
+describe('tagToAppTarget', () => {
+  it('should map WEB to website', () => {
+    expect(tagToAppTarget('WEB')).toBe('website');
+  });
+
+  it('should map FE to frontend', () => {
+    expect(tagToAppTarget('FE')).toBe('frontend');
+  });
+
+  it('should map BE to backend', () => {
+    expect(tagToAppTarget('BE')).toBe('backend');
+  });
+
+  it('should map INT to unified', () => {
+    expect(tagToAppTarget('INT')).toBe('unified');
   });
 });

@@ -70,7 +70,7 @@ Analyze the following product documentation and generate a complete website mark
 PRODUCT NAME: ${input.projectName}
 
 PRODUCT DOCUMENTATION:
-${input.productContext.slice(0, 8000)}
+${packProductContext(input.productContext)}
 ${competitorsBlock}${keywordsBlock}${marketNotesBlock}
 
 Generate a JSON response matching this exact structure:
@@ -288,6 +288,80 @@ export async function isStrategyStale(
 
   const currentHash = computeInputHash(currentInput);
   return stored.metadata.inputHash !== currentHash;
+}
+
+/**
+ * Pack product context into a budget with priority-based ordering
+ * Ensures high-priority docs (spec, pricing, brand) are included first
+ *
+ * @param productContext - Raw concatenated docs with "--- filename ---" headers
+ * @param budget - Maximum character budget (default 16000)
+ * @returns Packed context string within budget
+ */
+export function packProductContext(productContext: string, budget: number = 16000): string {
+  // Split by doc headers (--- filename ---)
+  const headerPattern = /^---\s+(.+?)\s+---$/gm;
+  const sections: Array<{ header: string; content: string; priority: number }> = [];
+  let lastIndex = 0;
+  let lastHeader = '';
+  let match;
+
+  while ((match = headerPattern.exec(productContext)) !== null) {
+    if (lastIndex > 0) {
+      sections.push({
+        header: lastHeader,
+        content: productContext.slice(lastIndex, match.index).trim(),
+        priority: getDocSortPriority(lastHeader),
+      });
+    }
+    lastHeader = match[0];
+    lastIndex = match.index + match[0].length;
+  }
+  // Push the last section
+  if (lastIndex > 0 && lastIndex < productContext.length) {
+    sections.push({
+      header: lastHeader,
+      content: productContext.slice(lastIndex).trim(),
+      priority: getDocSortPriority(lastHeader),
+    });
+  }
+
+  // If no headers found, return the raw context trimmed to budget
+  if (sections.length === 0) {
+    return productContext.slice(0, budget);
+  }
+
+  // Sort by priority (lower = more important)
+  sections.sort((a, b) => a.priority - b.priority);
+
+  // Pack into budget
+  let packed = '';
+  for (const section of sections) {
+    const block = `${section.header}\n${section.content}\n\n`;
+    if (packed.length + block.length <= budget) {
+      packed += block;
+    } else {
+      const remaining = budget - packed.length;
+      if (remaining > 200) {
+        packed += `${section.header}\n${section.content.slice(0, remaining - section.header.length - 10)}...\n`;
+      }
+      break;
+    }
+  }
+
+  return packed.trim();
+}
+
+/**
+ * Get sort priority for a doc section header (lower = higher priority)
+ */
+function getDocSortPriority(header: string): number {
+  const lower = header.toLowerCase();
+  if (/spec/i.test(lower)) return 1;
+  if (/pricing/i.test(lower)) return 2;
+  if (/color|brand/i.test(lower)) return 3;
+  if (/feature/i.test(lower)) return 4;
+  return 5;
 }
 
 /**

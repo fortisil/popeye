@@ -41,6 +41,7 @@ export * from './ui-designer.js';
 export * from './ui-verification.js';
 export * from './project-verification.js';
 export * from './auto-fix.js';
+export * from './auto-fix-bundler.js';
 export * from './project-structure.js';
 // Note: plan-parser.js exports are accessible but have naming conflicts with plan-mode.js
 // Import directly from './plan-parser.js' if you need the extended TaskAppTag type (includes 'WEB')
@@ -269,6 +270,17 @@ export async function resumeWorkflow(
       }
 
       case 'execution': {
+        // Update website content before resuming execution
+        if (state.language === 'website' || state.language === 'all' || state.language === 'fullstack') {
+          try {
+            onProgress?.('website-update', 'Updating website with project context before execution resume...');
+            const { updateWebsiteContent } = await import('./website-updater.js');
+            await updateWebsiteContent(projectDir, state, state.language, (msg) => onProgress?.('website-update', msg));
+          } catch {
+            // Non-blocking: website content update failure should not stop workflow
+          }
+        }
+
         onProgress?.('workflow', 'Resuming Execution Mode...');
 
         const executionResult = await resumeExecutionMode({

@@ -11,6 +11,7 @@ import {
   loadWebsiteStrategy,
   formatStrategyForPlanContext,
   isStrategyStale,
+  packProductContext,
 } from '../../src/workflow/website-strategy.js';
 import type {
   WebsiteStrategyDocument,
@@ -187,5 +188,59 @@ describe('isStrategyStale', () => {
     const loaded = await loadWebsiteStrategy(tempDir);
     expect(loaded).not.toBeNull();
     expect(loaded!.strategy.messaging.headline).toBe('Ship Code 10x Faster');
+  });
+});
+
+describe('packProductContext', () => {
+  it('preserves high-priority docs (spec, pricing) within budget', () => {
+    const context = [
+      '--- random-notes.md ---',
+      'Some random notes about the project.',
+      '',
+      '--- product-spec.md ---',
+      '# Product Specification\nThis is the product specification.',
+      '',
+      '--- pricing.md ---',
+      '# Pricing\nFree, Pro, Enterprise tiers.',
+      '',
+      '--- color-scheme.md ---',
+      '# Colors\nPrimary: #2563EB',
+    ].join('\n');
+
+    const packed = packProductContext(context, 500);
+
+    // Spec should come first (priority 1)
+    const specIndex = packed.indexOf('product-spec.md');
+    const pricingIndex = packed.indexOf('pricing.md');
+    const randomIndex = packed.indexOf('random-notes.md');
+
+    expect(specIndex).toBeGreaterThanOrEqual(0);
+    expect(pricingIndex).toBeGreaterThanOrEqual(0);
+    // Spec should appear before random notes (or random notes may be cut)
+    if (randomIndex >= 0) {
+      expect(specIndex).toBeLessThan(randomIndex);
+    }
+  });
+
+  it('handles context without headers gracefully', () => {
+    const context = 'Just raw text without any headers';
+
+    const packed = packProductContext(context, 100);
+
+    expect(packed).toBe(context);
+  });
+
+  it('respects budget limit', () => {
+    const largeContext = [
+      '--- spec.md ---',
+      'x'.repeat(5000),
+      '',
+      '--- pricing.md ---',
+      'y'.repeat(5000),
+    ].join('\n');
+
+    const packed = packProductContext(largeContext, 1000);
+
+    expect(packed.length).toBeLessThanOrEqual(1100); // Some tolerance for headers
   });
 });

@@ -18,12 +18,14 @@ Popeye is an autonomous software development agent that takes a simple project i
 1. **Understands** your idea and expands it into a detailed specification
 2. **Designs** the UI automatically based on the project context
 3. **Strategizes** (website projects) by generating a marketing strategy with ICP, positioning, SEO, and conversion goals
-4. **Plans** a complete development roadmap with milestones and tasks
-5. **Validates** the plan through AI consensus (multiple AI systems must agree)
-6. **Implements** each task autonomously, writing production-quality code
-7. **Styles** the application with a professional design system and component library
-8. **Tests** the implementation and fixes issues automatically
-9. **Delivers** a complete, working project with polished UI
+4. **Validates context** (website projects) by checking content quality before generation and warning about missing docs, default pricing, or placeholder content
+5. **Plans** a complete development roadmap with milestones and tasks
+6. **Validates** the plan through AI consensus (multiple AI systems must agree)
+7. **Implements** each task autonomously, writing production-quality code
+8. **Scans** generated website files for placeholder fingerprints (TODO comments, lorem ipsum, default tiers) and reports quality warnings
+9. **Styles** the application with a professional design system and component library
+10. **Tests** the implementation and fixes issues automatically
+11. **Delivers** a complete, working project with polished UI
 
 ## How It Works
 
@@ -360,6 +362,8 @@ Popeye provides real-time feedback:
 [Website Strategy] Generating website strategy via AI...
 [Website Strategy] Validating strategy schema...
 [Website Strategy] Strategy cached to .popeye/website-strategy.json
+[Validation] Website context score: 85/100
+[Validation] Warning: No tagline extracted from docs. Footer and meta tags will use generic defaults.
 [Consensus] Review round 1: 78% agreement (Marketing Strategist persona)
 [Consensus] Addressing concerns...
 [Consensus] Review round 2: 92% agreement
@@ -373,10 +377,12 @@ Popeye provides real-time feedback:
 [UI Setup] Installing UI component dependencies...
 [UI Setup] Setting up theme and styles...
 [UI Setup] UI setup complete: 5 components installed
+[Content Scan] Scanned 14 files, score: 95/100
+[Content Scan] Warning: src/app/pricing/page.tsx - Default pricing amount ($29/mo)
 [Complete] Project built successfully!
 ```
 
-**Note:** The `[Website Strategy]` steps appear only for `website` and `all` project types. The marketing strategist persona for consensus review is also specific to website projects.
+**Note:** The `[Website Strategy]`, `[Validation]`, and `[Content Scan]` steps appear only for `website` and `all` project types. The marketing strategist persona for consensus review is also specific to website projects. Validation warnings are informational and do not block generation (except in direct `website.ts` generation, where blocking issues cause an error).
 
 ## Features
 
@@ -476,6 +482,41 @@ Popeye automatically discovers brand assets (logos, favicons, color schemes) fro
 - Logo files are copied to `public/brand/logo.{ext}`
 - Primary brand color is extracted from design docs or CSS variables
 - The `BrandAssetsContract` interface ensures consistent logo placement across Header, manifest, and metadata
+
+#### Dual-Mode Website Context Validation
+
+Website generation includes a two-layer quality system that prevents generic, placeholder-filled websites:
+
+**Pre-Generation Validation** checks the content context before any code is written. It operates in two modes:
+
+| Mode | Function | Behavior | Used By |
+|------|----------|----------|---------|
+| **Hard (throwing)** | `validateWebsiteContextOrThrow()` | Throws an error and blocks generation | `website.ts` (direct generation) |
+| **Soft (non-throwing)** | `validateWebsiteContext()` | Returns `ValidationResult` with issues/warnings, logs but does not block | `all.ts`, `website-updater.ts`, `upgrade/handlers.ts` |
+
+The `ValidationResult` includes:
+- `passed` -- whether the context has no blocking issues
+- `issues` -- blocking problems (suspicious product name, missing docs, no features, missing strategy)
+- `warnings` -- non-blocking concerns (default pricing tiers, missing tagline/description/brand color)
+- `contentScore` -- 0-100 quality score, deducted for each default or missing piece
+
+Checks include: suspicious product name detection (e.g., `my-app`), missing documentation, zero features extracted, missing strategy, brand/color doc parsing failures, default pricing fingerprint detection (Starter/Pro/Enterprise at $0/$29/Custom), and missing tagline/description/brand color.
+
+**Post-Generation Content Scanner** (`website-content-scanner.ts`) scans the generated `.tsx`/`.ts` files for known placeholder fingerprints after code has been written:
+
+| Pattern | Severity | Description |
+|---------|----------|-------------|
+| TODO comments | error | `// TODO`, `/* TODO */`, `{/* TODO */}` |
+| Lorem ipsum | error | Placeholder text left in templates |
+| Default tagline | warning | "Build something amazing" |
+| Generic description | warning | "Your modern web application" |
+| Default pricing | warning | `$29/mo` amounts in generated files |
+| Default pricing tiers | warning | Starter/Pro/Enterprise tier names together |
+| Default How It Works | warning | Sign Up/Configure/Deploy steps together |
+
+The scanner returns a `ScanResult` with all issues, the number of files scanned, and a 0-100 quality score. Issues are logged as warnings so developers can review and fix placeholder content.
+
+Both layers work together: pre-generation validation catches missing inputs, while post-generation scanning catches placeholder content that slipped through into the generated code. The `skipValidation` option in `generateWebsiteProject()` provides an escape hatch for edge cases.
 
 #### Reviewer Persona Switching
 
@@ -1303,7 +1344,8 @@ src/
 │   ├── typescript.ts     # TypeScript scaffolding
 │   ├── fullstack.ts      # Fullstack scaffolding (React + FastAPI)
 │   ├── website.ts        # Website scaffolding (Next.js, strategy-aware)
-│   ├── website-context.ts # Doc discovery, brand assets, content context builder
+│   ├── website-context.ts # Doc discovery, brand assets, content context, dual-mode validation
+│   ├── website-content-scanner.ts # Post-generation placeholder fingerprint scanner
 │   ├── doc-parser.ts     # Product doc parsing (name, tagline, features, pricing, color)
 │   ├── all.ts            # ALL project scaffolding (exports 5 generator functions)
 │   └── templates/        # File templates

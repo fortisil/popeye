@@ -48,6 +48,10 @@ import {
   generateLeadCaptureEnvExample,
 } from './templates/website-conversion.js';
 import type { WebsiteContentContext } from './website-context.js';
+import { validateWebsiteContextOrThrow } from './website-context.js';
+import { scanGeneratedContent } from './website-content-scanner.js';
+import { printDebugTrace, isDebugEnabled } from './website-debug.js';
+import type { WebsiteDebugTrace } from './website-debug.js';
 
 /**
  * Project generation result
@@ -75,6 +79,8 @@ export interface WebsiteGeneratorOptions {
   skipReadme?: boolean;
   /** Content context from user docs for populating templates */
   contentContext?: WebsiteContentContext;
+  /** Skip content validation (scaffold-only use) */
+  skipValidation?: boolean;
 }
 
 /**
@@ -111,6 +117,7 @@ export async function generateWebsiteProject(
     skipDocker = false,
     skipReadme = false,
     contentContext,
+    skipValidation = false,
   } = options;
 
   const projectName = spec.name || 'my-project';
@@ -140,6 +147,51 @@ export async function generateWebsiteProject(
       await ensureDir(path.join(projectDir, '.popeye'));
     }
 
+    // Validate content context quality gate
+    if (!skipValidation) {
+      const validationContext = contentContext || {
+        productName: projectName,
+        features: [],
+        rawDocs: '',
+      };
+      validateWebsiteContextOrThrow(validationContext, projectName);
+    }
+
+    // Debug trace
+    if (isDebugEnabled() && contentContext) {
+      const trace: WebsiteDebugTrace = {
+        workspaceRoot: projectDir,
+        docsFound: contentContext.rawDocs
+          ? contentContext.rawDocs.split(/^--- .+ ---$/m).filter(Boolean).map((s, i) => ({
+              path: `doc-${i}`,
+              size: s.length,
+            }))
+          : [],
+        brandAssets: {
+          logoPath: contentContext.brand?.logoPath,
+          logoOutputPath: contentContext.brandAssets?.logoOutputPath || 'public/brand/logo.svg',
+        },
+        productName: {
+          value: contentContext.productName,
+          source: contentContext.rawDocs ? 'docs' : 'directory',
+        },
+        primaryColor: {
+          value: contentContext.brand?.primaryColor,
+          source: contentContext.brand?.primaryColor ? 'brand-docs' : 'defaults',
+        },
+        strategyStatus: contentContext.strategy ? 'success' : 'skipped',
+        templateValues: {
+          headline: contentContext.strategy?.messaging.headline,
+          features: contentContext.features.length,
+          pricingTiers: contentContext.pricing?.length || 0,
+        },
+        sectionsRendered: [],
+        validationPassed: true,
+        validationIssues: [],
+      };
+      printDebugTrace(trace);
+    }
+
     // Generate and write files
     const files: Array<{ path: string; content: string }> = [
       // Config files
@@ -157,7 +209,11 @@ export async function generateWebsiteProject(
       },
       {
         path: path.join(projectDir, 'tailwind.config.ts'),
-        content: generateWebsiteTailwindConfig(),
+        content: generateWebsiteTailwindConfig({
+          primaryColor: contentContext?.brand?.primaryColor,
+          workspaceMode,
+          projectName: workspaceMode ? projectName : undefined,
+        }),
       },
       {
         path: path.join(projectDir, 'postcss.config.js'),
@@ -313,11 +369,11 @@ export async function generateWebsiteProject(
       });
     }
 
-    // Copy logo to public/ if brand context has one
+    // Copy logo to public/brand/ if brand context has one
     if (contentContext?.brand?.logoPath) {
       try {
         const logoExt = path.extname(contentContext.brand.logoPath);
-        const destPath = path.join(projectDir, 'public', `logo${logoExt}`);
+        const destPath = path.join(projectDir, 'public', 'brand', `logo${logoExt}`);
         await fs.copyFile(contentContext.brand.logoPath, destPath);
         filesCreated.push(destPath);
       } catch {
@@ -345,6 +401,18 @@ export async function generateWebsiteProject(
     for (const file of files) {
       await writeFile(file.path, file.content);
       filesCreated.push(file.path);
+    }
+
+    // Post-generation content scan for placeholder fingerprints
+    try {
+      const scanResult = await scanGeneratedContent(projectDir);
+      if (scanResult.issues.length > 0) {
+        for (const issue of scanResult.issues) {
+          console.warn(`[content-scan] ${issue.severity}: ${issue.message} in ${issue.file}`);
+        }
+      }
+    } catch {
+      // Non-blocking: scan failures should not stop generation
     }
 
     return {

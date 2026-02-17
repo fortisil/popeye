@@ -279,6 +279,12 @@ function analyzeProject(
       'Project includes a website but was completed without any user documentation. Website likely has placeholder content.',
       'Run /overview fix to discover docs and update website template files');
   }
+  // Show strategy error if present
+  if (state.strategyError) {
+    push('error', 'strategy',
+      `Website strategy generation failed: ${state.strategyError}`,
+      'Ensure OpenAI API key is set and product docs are available, then re-run planning');
+  }
   return issues;
 }
 

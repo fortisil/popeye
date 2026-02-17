@@ -19,6 +19,7 @@ import {
   storeSpecification,
   storeUserDocs,
   storeBrandContext,
+  storeSourceDocPaths,
   storeWebsiteStrategyPath,
   addMilestones,
 } from '../state/index.js';
@@ -265,7 +266,7 @@ function isActionableTask(name: string): boolean {
 /**
  * Task app tag for fullstack projects
  */
-export type TaskAppTag = 'FE' | 'BE' | 'INT';
+export type TaskAppTag = 'FE' | 'BE' | 'INT' | 'WEB';
 
 /**
  * Task with app targeting information for fullstack projects
@@ -274,7 +275,7 @@ export interface ParsedFullstackTask {
   name: string;
   description: string;
   appTag?: TaskAppTag;
-  appTarget?: 'frontend' | 'backend' | 'unified';
+  appTarget?: 'frontend' | 'backend' | 'unified' | 'website';
   files?: string[];
   dependencies?: string[];
   acceptanceCriteria?: string[];
@@ -289,7 +290,7 @@ export interface ParsedFullstackTask {
  * @returns The parsed app tag or undefined
  */
 export function parseTaskTag(taskName: string): TaskAppTag | undefined {
-  const tagMatch = taskName.match(/\[(FE|BE|INT)\]/i);
+  const tagMatch = taskName.match(/\[(FE|BE|INT|WEB)\]/i);
   if (tagMatch) {
     return tagMatch[1].toUpperCase() as TaskAppTag;
   }
@@ -302,10 +303,11 @@ export function parseTaskTag(taskName: string): TaskAppTag | undefined {
  * @param tag - The task tag
  * @returns The app target
  */
-export function tagToAppTarget(tag: TaskAppTag): 'frontend' | 'backend' | 'unified' {
+export function tagToAppTarget(tag: TaskAppTag): 'frontend' | 'backend' | 'unified' | 'website' {
   switch (tag) {
     case 'FE': return 'frontend';
     case 'BE': return 'backend';
+    case 'WEB': return 'website';
     case 'INT': return 'unified';
   }
 }
@@ -377,6 +379,7 @@ export function validateFullstackPlan(plan: string): {
     feTasks: number;
     beTasks: number;
     intTasks: number;
+    webTasks: number;
     untaggedTasks: number;
   };
 } {
@@ -385,6 +388,7 @@ export function validateFullstackPlan(plan: string): {
   let feTasks = 0;
   let beTasks = 0;
   let intTasks = 0;
+  let webTasks = 0;
   let untaggedTasks = 0;
 
   // Find all task headers
@@ -401,6 +405,7 @@ export function validateFullstackPlan(plan: string): {
         case 'FE': feTasks++; break;
         case 'BE': beTasks++; break;
         case 'INT': intTasks++; break;
+        case 'WEB': webTasks++; break;
       }
     } else {
       untaggedTasks++;
@@ -435,6 +440,7 @@ export function validateFullstackPlan(plan: string): {
       feTasks,
       beTasks,
       intTasks,
+      webTasks,
       untaggedTasks,
     },
   };
@@ -599,6 +605,7 @@ export function parsePlanMilestones(plan: string): Omit<Milestone, 'id'>[] {
   while ((taskMatch = explicitTaskPattern.exec(plan)) !== null) {
     const name = taskMatch[1].trim()
       .replace(/^\*\*(.+)\*\*$/, '$1')  // Remove bold
+      .replace(/^\[(?:FE|BE|INT|WEB|API|DB)\]\s*:?\s*/i, '')  // Strip app tags before verb check
       .replace(/^:/, '')                 // Remove leading colon
       .trim();
 
@@ -917,10 +924,16 @@ export async function runPlanMode(
         userDocs = await readProjectDocs(docPaths);
         onProgress?.('doc-discovery', `Found ${docPaths.length} project doc(s)`);
         state = await storeUserDocs(projectDir, userDocs);
+        // Store source doc paths for later re-reading
+        state = await storeSourceDocPaths(projectDir, docPaths);
         await logger.info('init', 'docs_found', `Found ${docPaths.length} project docs`, {
           docCount: docPaths.length,
           docPaths: docPaths.map((p) => path.basename(p)),
         });
+
+        // Generate PROJECT_BRIEF.md in .popeye/ for persistent reference
+        await generateProjectBrief(projectDir, spec.name || state.name, userDocs, docPaths);
+        onProgress?.('doc-discovery', 'Generated PROJECT_BRIEF.md');
       }
       const brandAssets = await findBrandAssets(parentDir);
       if (brandAssets.logoPath) {
@@ -1013,12 +1026,13 @@ export async function runPlanMode(
         });
       } catch (strategyError) {
         // Non-blocking: strategy generation failure should not stop the workflow
+        const errorMsg = strategyError instanceof Error ? strategyError.message : 'Unknown error';
         onProgress?.(
           'get-context',
-          `Website strategy skipped: ${strategyError instanceof Error ? strategyError.message : 'Unknown error'}`
+          `WARNING: Website strategy failed: ${errorMsg}`
         );
-        await logger.warn('website-strategy', 'strategy_skipped', 'Website strategy was skipped', {
-          error: strategyError instanceof Error ? strategyError.message : 'Unknown error',
+        await logger.error('website-strategy', 'strategy_failed', 'Website strategy generation failed', {
+          error: errorMsg,
         });
       }
     }
@@ -1372,4 +1386,64 @@ export async function resumePlanMode(
       projectDir,
     }
   );
+}
+
+/**
+ * Generate a PROJECT_BRIEF.md file in .popeye/ that summarizes
+ * key project details extracted from user documentation.
+ *
+ * This brief is loaded at every workflow stage for consistent context.
+ *
+ * @param projectDir - The project root directory
+ * @param projectName - The project/product name
+ * @param userDocs - Combined user documentation content
+ * @param docPaths - Absolute paths to source doc files
+ */
+async function generateProjectBrief(
+  projectDir: string,
+  projectName: string,
+  userDocs: string,
+  docPaths: string[]
+): Promise<void> {
+  const briefDir = path.join(projectDir, '.popeye');
+  const briefPath = path.join(briefDir, 'PROJECT_BRIEF.md');
+
+  // Extract key details from docs
+  const productName = extractBriefField(userDocs, /^#\s+(.+)/m) || projectName;
+  const tagline = extractBriefField(userDocs, /(?:tagline|subtitle|description)[:\s]+["']?(.+?)["']?\s*$/im) || '';
+  const primaryColor = extractBriefField(userDocs, /#([0-9a-fA-F]{6})\b/) || '';
+
+  const briefContent = [
+    `# Project Brief: ${productName}`,
+    '',
+    `**Product Name:** ${productName}`,
+    tagline ? `**Tagline:** ${tagline}` : '',
+    primaryColor ? `**Primary Color:** #${primaryColor}` : '',
+    '',
+    '## Source Documents',
+    ...docPaths.map(p => `- ${path.basename(p)}`),
+    '',
+    '---',
+    '*Auto-generated by Popeye. Re-read source docs for full context.*',
+    '',
+  ].filter(line => line !== undefined).join('\n');
+
+  try {
+    await fs.mkdir(briefDir, { recursive: true });
+    await fs.writeFile(briefPath, briefContent, 'utf-8');
+  } catch {
+    // Non-critical: brief generation failure shouldn't stop workflow
+  }
+}
+
+/**
+ * Extract a field value from documentation using a regex pattern.
+ *
+ * @param content - Documentation content to search
+ * @param pattern - Regex with a capture group for the value
+ * @returns The captured value, or null if not found
+ */
+function extractBriefField(content: string, pattern: RegExp): string | null {
+  const match = content.match(pattern);
+  return match?.[1]?.trim() || null;
 }

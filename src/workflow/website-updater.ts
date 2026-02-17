@@ -9,13 +9,14 @@ import path from 'node:path';
 import type { ProjectState } from '../types/workflow.js';
 import type { OutputLanguage } from '../types/project.js';
 import { isWorkspace } from '../types/project.js';
-import { buildWebsiteContext } from '../generators/website-context.js';
+import { buildWebsiteContext, resolveBrandAssets, validateWebsiteContext } from '../generators/website-context.js';
+import { resolveWorkspaceRoot } from '../generators/workspace-root.js';
+import { generateWebsiteLandingPage } from '../generators/templates/website-landing.js';
+import { generateWebsitePricingPage } from '../generators/templates/website-pricing.js';
 import {
-  generateWebsiteLandingPage,
-  generateWebsitePricingPage,
   generateWebsiteLayout,
   generateWebsiteGlobalsCss,
-} from '../generators/templates/website.js';
+} from '../generators/templates/website-layout.js';
 import {
   generateWebsiteHeader,
   generateWebsiteFooter,
@@ -71,11 +72,21 @@ export async function updateWebsiteContent(
     };
   }
 
+  // Resolve brand assets using workspace root for proper logo resolution
+  const workspaceRoot = await resolveWorkspaceRoot(parentDir);
+  context.brandAssets = await resolveBrandAssets(workspaceRoot, context.brand);
+
   // Load website strategy if available
   const strategyData = await loadWebsiteStrategy(projectDir);
   if (strategyData) {
     context.strategy = strategyData.strategy;
     onProgress?.('Loaded website strategy for content update');
+  }
+
+  // Soft validation: report quality issues via progress callback
+  const validation = validateWebsiteContext(context, state.name);
+  for (const msg of [...validation.issues, ...validation.warnings]) {
+    onProgress?.(`[quality-gate] ${msg}`);
   }
 
   onProgress?.('Updating website content with project context...');
@@ -116,11 +127,11 @@ export async function updateWebsiteContent(
     }
   }
 
-  // Copy logo to public/ if brand context has one
+  // Copy logo to public/brand/ if brand context has one
   if (context.brand?.logoPath) {
     try {
       const logoExt = path.extname(context.brand.logoPath);
-      const destPath = path.join(websiteDir, 'public', `logo${logoExt}`);
+      const destPath = path.join(websiteDir, 'public', 'brand', `logo${logoExt}`);
       await fs.copyFile(context.brand.logoPath, destPath);
     } catch {
       // Non-blocking

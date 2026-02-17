@@ -353,6 +353,20 @@ export async function storeUserDocs(
 }
 
 /**
+ * Store discovered source document paths in project state
+ *
+ * @param projectDir - The project root directory
+ * @param sourceDocPaths - Array of absolute paths to doc files
+ * @returns The updated state
+ */
+export async function storeSourceDocPaths(
+  projectDir: string,
+  sourceDocPaths: string[]
+): Promise<ProjectState> {
+  return updateState(projectDir, { sourceDocPaths });
+}
+
+/**
  * Store brand context in project state
  *
  * @param projectDir - The project root directory

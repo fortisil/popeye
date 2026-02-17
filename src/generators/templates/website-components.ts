@@ -37,9 +37,10 @@ export function generateWebsiteHeader(
     .join(' ');
 
   const hasLogo = !!(context?.brandAssets?.logoOutputPath || context?.brand?.logoPath);
+  // Reason: Next.js serves public/ at root, so public/brand/logo.svg -> /brand/logo.svg
   const logoPath = context?.brandAssets?.logoOutputPath
-    ? `/${context.brandAssets.logoOutputPath}`
-    : '/logo.svg';
+    ? `/${context.brandAssets.logoOutputPath.replace(/^public\//, '')}`
+    : '/brand/logo.svg';
 
   // Build nav items from strategy or defaults
   const navItems = strategy?.siteArchitecture.navigation || [
@@ -57,10 +58,14 @@ export function generateWebsiteHeader(
   const ctaText = strategy?.conversionStrategy.primaryCta.text || 'Get Started';
   const ctaHref = strategy?.conversionStrategy.primaryCta.href || '/pricing';
 
-  // Logo rendering
+  // Logo rendering: Image if available, product initial circle if not
+  const initialLetter = displayName.charAt(0).toUpperCase();
   const logoBlock = hasLogo
     ? `<Image src="${logoPath}" alt="${escapeJsx(displayName)}" width={32} height={32} className="h-8 w-auto" />`
-    : `<span className="text-xl font-bold text-primary-600">${escapeJsx(displayName)}</span>`;
+    : `<div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-600 text-sm font-bold text-white">${initialLetter}</div>
+            <span className="text-lg font-bold text-foreground">${escapeJsx(displayName)}</span>
+          </div>`;
 
   return `'use client';
 
@@ -217,29 +222,49 @@ ${sectionsStr}
  */
 export default function Footer() {
   return (
-    <footer className="border-t border-gray-200 bg-gray-50">
+    <footer className="border-t border-border bg-muted/50">
       <div className="container py-12">
         <div className="grid grid-cols-2 gap-8 md:grid-cols-${Math.min(sections.length + 1, 4)}">
           {/* Brand column */}
           <div className="col-span-2 md:col-span-1">
-            <Link href="/" className="text-lg font-bold text-gray-900">
+            <Link href="/" className="text-lg font-bold text-foreground">
               ${escapeJsx(displayName)}
             </Link>
-            <p className="mt-2 text-sm text-gray-600">
+            <p className="mt-2 text-sm text-muted-foreground">
               ${context?.tagline ? escapeJsx(context.tagline) : 'Build something amazing.'}
             </p>
+            {/* Newsletter */}
+            <form className="mt-6" onSubmit={(e) => e.preventDefault()}>
+              <label htmlFor="newsletter-email" className="text-sm font-medium text-foreground">
+                Stay updated
+              </label>
+              <div className="mt-2 flex gap-2">
+                <input
+                  id="newsletter-email"
+                  type="email"
+                  placeholder="you@example.com"
+                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary-600"
+                />
+                <button
+                  type="submit"
+                  className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-500 transition-colors"
+                >
+                  Subscribe
+                </button>
+              </div>
+            </form>
           </div>
 
           {/* Link columns */}
           {FOOTER_SECTIONS.map((section) => (
             <div key={section.title}>
-              <h3 className="text-sm font-semibold text-gray-900">{section.title}</h3>
+              <h3 className="text-sm font-semibold text-foreground">{section.title}</h3>
               <ul className="mt-4 space-y-2">
                 {section.links.map((link) => (
                   <li key={link.href}>
                     <Link
                       href={link.href}
-                      className="text-sm text-gray-600 hover:text-primary-600 transition-colors"
+                      className="text-sm text-muted-foreground hover:text-primary-600 transition-colors"
                     >
                       {link.label}
                     </Link>
@@ -250,8 +275,8 @@ export default function Footer() {
           ))}
         </div>
 
-        <div className="mt-12 border-t border-gray-200 pt-8">
-          <p className="text-center text-sm text-gray-500">
+        <div className="mt-12 border-t border-border pt-8">
+          <p className="text-center text-sm text-muted-foreground">
             &copy; {new Date().getFullYear()} ${escapeJsx(displayName)}. All rights reserved.
           </p>
         </div>

@@ -5,6 +5,7 @@
 
 import { Command } from 'commander';
 import path from 'node:path';
+import { promises as fs } from 'node:fs';
 import { ProjectSpecSchema, type OutputLanguage, type OpenAIModel } from '../../types/project.js';
 import { requireAuth } from '../../auth/index.js';
 import { runWorkflow } from '../../workflow/index.js';
@@ -99,8 +100,8 @@ export function createCreateCommand(): Command {
         }
 
         // Generate project name from idea if not provided
-        const projectName = options.name || generateProjectName(idea);
         const outputDir = path.resolve(options.output);
+        const projectName = options.name || await generateProjectName(idea, outputDir);
         const projectDir = path.join(outputDir, projectName);
         const threshold = parseInt(options.threshold, 10);
         const maxIterations = parseInt(options.maxIterations, 10);
@@ -255,10 +256,63 @@ export function createCreateCommand(): Command {
 }
 
 /**
- * Generate a project name from an idea
+ * Directories that are too generic to use as project names
  */
-function generateProjectName(idea: string): string {
-  // Take first few words, lowercase, replace spaces with hyphens
+const GENERIC_DIR_NAMES = new Set([
+  'home', 'desktop', 'documents', 'downloads', 'projects', 'project',
+  'repos', 'code', 'dev', 'workspace', 'workspaces', 'src', 'tmp',
+  'temp', 'users', 'user', 'root', 'var', 'opt',
+]);
+
+/**
+ * Generate a project name, preferring CWD-derived names over prompt text.
+ *
+ * Priority: docs in CWD -> CWD basename -> idea text extraction
+ *
+ * @param idea - The user's project idea text
+ * @param cwd - Optional directory for context-aware naming
+ * @returns A kebab-case project name
+ */
+async function generateProjectName(idea: string, cwd?: string): Promise<string> {
+  const toKebab = (name: string): string =>
+    name
+      .replace(/([a-z])([A-Z])/g, '$1-$2')
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+  if (cwd) {
+    // Check for doc-derived name
+    try {
+      const entries = await fs.readdir(cwd, { withFileTypes: true });
+      const mdFiles = entries
+        .filter(e => e.isFile() && e.name.endsWith('.md') && !e.name.toLowerCase().startsWith('readme'))
+        .map(e => path.join(cwd, e.name));
+
+      for (const mdFile of mdFiles) {
+        try {
+          const content = await fs.readFile(mdFile, 'utf-8');
+          const headingMatch = content.match(/^#\s+([A-Z][a-zA-Z0-9]+)/m);
+          if (headingMatch && headingMatch[1] && headingMatch[1].length >= 3 && headingMatch[1].length <= 30) {
+            return toKebab(headingMatch[1]);
+          }
+        } catch {
+          // Skip unreadable files
+        }
+      }
+    } catch {
+      // Directory not readable
+    }
+
+    // Check CWD basename
+    const dirName = path.basename(cwd);
+    if (dirName.length >= 3 && !GENERIC_DIR_NAMES.has(dirName.toLowerCase())) {
+      return toKebab(dirName);
+    }
+  }
+
+  // Fallback: extract from idea text
   return idea
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
