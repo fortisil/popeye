@@ -709,6 +709,70 @@ The `qaEnabled` field in `ProjectState` controls whether the 7-phase workflow is
 | `consensus.threshold` | 95 | Code plan consensus threshold |
 | `consensus.testPlanThreshold` | 90 | Test plan consensus threshold (lower to avoid over-engineering test plans) |
 
+### Deferred Database Integration
+
+Fullstack and ALL projects include a 3-phase deferred database integration system. Instead of requiring a running database at project creation time, Popeye generates all the necessary database scaffolding and provides tools to configure and apply it later.
+
+#### Phase 1: Types and Templates
+
+The database layer generates production-ready templates for:
+
+| Template Set | Contents |
+|-------------|----------|
+| **SQLAlchemy** | Connection module, startup hook, health route, conftest, Alembic config, initial migration |
+| **Alembic** | `alembic.ini`, `env.py`, initial migration script |
+| **pgvector** | Vector extension setup for AI/ML workloads |
+| **Docker** | `docker-compose.yml` with PostgreSQL service, health checks, volumes |
+| **Environment** | `.env.example` with `DATABASE_URL`, `ADMIN_SETUP_TOKEN` |
+
+Database configuration is tracked in `ProjectState.dbConfig` with the following status lifecycle:
+
+```
+none -> configured -> migrating -> ready
+                  \-> error
+```
+
+#### Phase 2: State Machine and CLI Commands
+
+The database lifecycle is managed by a state machine (`db-state-machine.ts`) that enforces valid transitions between statuses. Two CLI commands provide management:
+
+**`/db [action]`** -- Database management:
+- `/db status` -- Show current database configuration and status
+- `/db configure` -- Interactively set DATABASE_URL and write to `.env`
+- `/db apply` -- Run the setup pipeline (create tables, run migrations)
+
+**`/doctor`** -- Readiness checks (8 checks):
+- `.env` file exists with `DATABASE_URL`
+- Backend directory structure is valid
+- `requirements.txt` includes database dependencies
+- Alembic configuration is present
+- Docker Compose includes postgres service
+- Database connection is reachable
+- Migrations are up to date
+- Health endpoint returns OK
+
+#### Phase 3: Admin Wizard UI
+
+The admin wizard generates a complete database setup experience with both backend and frontend components:
+
+**Backend (FastAPI):**
+- `admin_auth.py` middleware -- Validates `X-Admin-Token` header against `ADMIN_SETUP_TOKEN` env var
+- `admin_db.py` routes -- RESTful endpoints under `/api/admin/db`:
+  - `GET /status` -- Current DB status, migration count, connection info
+  - `POST /configure` -- Save database URL to `.env`
+  - `POST /test` -- Test database connectivity
+  - `POST /apply` -- Run Alembic migrations
+  - `POST /rollback` -- Roll back the last migration
+
+**Frontend (React):**
+- `useAdminApi` hook -- Authenticated API calls with `X-Admin-Token` header
+- `DbStatusBanner` -- Displays current database status with color-coded indicators
+- `ConnectionForm` -- Database URL input with connection test button
+- `MigrationProgress` -- Real-time migration progress display
+- `DbSetupStepper` -- Step-by-step wizard guiding the full setup flow
+
+Both the `fullstack.ts` and `all.ts` generators wire the admin wizard layer automatically. The admin wizard files are included in `getFullstackProjectFiles()` and `getAllProjectFiles()` for validation.
+
 ### Observability Features
 
 - **Workflow Logging**: Detailed logs written to `docs/WORKFLOW_LOG.md`
@@ -855,6 +919,9 @@ popeye
 /model [provider] [model]  Show/set AI model (openai/gemini/grok)
 /model <provider> list     Show known models for a provider
 /upgrade [target]          Upgrade project type (e.g., fullstack -> all)
+/overview [fix]            Project review with analysis; fix to auto-discover docs
+/db [action]               Database management (status/configure/apply)
+/doctor                    Run database and project readiness checks
 /info                      Show system info (Claude CLI status, API keys, etc.)
 /clear                     Clear screen
 /exit                      Exit interactive mode
@@ -1150,6 +1217,13 @@ my-project/
 │   │   ├── src/
 │   │   │   ├── components/
 │   │   │   │   └── ui/        # shadcn/ui components
+│   │   │   ├── admin/              # Admin wizard components
+│   │   │   │   ├── useAdminApi.ts      # Authenticated API hook
+│   │   │   │   ├── DbStatusBanner.tsx  # DB status indicator
+│   │   │   │   ├── ConnectionForm.tsx  # DB URL input + test
+│   │   │   │   ├── MigrationProgress.tsx # Migration progress
+│   │   │   │   ├── DbSetupStepper.tsx  # Setup wizard stepper
+│   │   │   │   └── index.ts           # Admin component exports
 │   │   │   ├── pages/
 │   │   │   ├── hooks/
 │   │   │   ├── lib/
@@ -1165,11 +1239,22 @@ my-project/
 │   │
 │   └── backend/               # FastAPI backend
 │       ├── src/
-│       │   ├── api/
-│       │   │   └── routes/
+│       │   ├── {package}/
+│       │   │   ├── routes/
+│       │   │   │   ├── health_db.py    # DB health endpoint
+│       │   │   │   └── admin_db.py     # Admin wizard routes
+│       │   │   ├── middleware/
+│       │   │   │   ├── __init__.py
+│       │   │   │   └── admin_auth.py   # X-Admin-Token validation
+│       │   │   ├── db.py               # SQLAlchemy connection module
+│       │   │   └── main.py
 │       │   ├── models/
 │       │   ├── services/
 │       │   └── main.py
+│       ├── alembic/                    # Database migrations
+│       │   ├── env.py
+│       │   └── versions/
+│       ├── alembic.ini
 │       ├── tests/
 │       │   └── conftest.py
 │       ├── pyproject.toml
@@ -1215,7 +1300,7 @@ my-project/
 ├── README.md
 ├── .gitignore
 ├── .env.example
-├── docker-compose.yml         # Full stack orchestration
+├── docker-compose.yml         # Full stack orchestration (includes PostgreSQL service)
 ├── popeye.md                  # Project configuration
 └── .popeye/
     ├── state.json
@@ -1434,8 +1519,10 @@ src/
 ├── cli/                  # CLI interface
 │   ├── index.ts          # Command setup
 │   ├── output.ts         # Output formatting
-│   ├── interactive.ts    # REPL mode (with /model, /upgrade, /overview commands)
+│   ├── interactive.ts    # REPL mode (with /model, /upgrade, /overview, /db, /doctor commands)
 │   └── commands/         # Individual commands
+│       ├── db.ts         # Database management CLI (status/configure/apply)
+│       └── doctor.ts     # Readiness checks (8 checks for DB and project health)
 ├── adapters/             # AI service adapters
 │   ├── claude.ts         # Claude Agent SDK (with rate limiting)
 │   ├── openai.ts         # OpenAI API (default reviewer, marketing persona for websites)
@@ -1456,6 +1543,8 @@ src/
 │   ├── website-context.ts # Doc discovery, brand assets, content context, dual-mode validation
 │   ├── website-content-scanner.ts # Post-generation placeholder fingerprint scanner
 │   ├── doc-parser.ts     # Product doc parsing (name, tagline, features, pricing, color)
+│   ├── database.ts       # DB layer orchestration (generatePythonDatabaseLayer, getDatabaseFiles)
+│   ├── admin-wizard.ts   # Admin wizard orchestration (generateAdminWizardLayer, getAdminWizardFiles)
 │   ├── all.ts            # ALL project scaffolding (exports 5 generator functions)
 │   └── templates/        # File templates
 │       ├── python.ts
@@ -1466,6 +1555,10 @@ src/
 │       ├── website-components.ts # Header, Footer, Navigation components
 │       ├── website-seo.ts      # JSON-LD, sitemap, robots, 404, 500, manifest, meta
 │       ├── website-conversion.ts # Lead capture route, contact form, env examples
+│       ├── database-python.ts  # SQLAlchemy + Alembic + pgvector templates (12 functions)
+│       ├── database-docker.ts  # Docker Compose + postgres service templates
+│       ├── admin-wizard-python.ts  # FastAPI admin auth middleware + admin DB routes
+│       ├── admin-wizard-react.ts   # React admin wizard components (status, forms, stepper)
 │       └── index.ts            # Template module exports
 ├── state/                # State management
 │   ├── persistence.ts    # File operations
@@ -1482,6 +1575,8 @@ src/
 │   ├── milestone-workflow.ts
 │   ├── task-workflow.ts  # 7-phase task workflow with QA gate
 │   ├── tester.ts         # QA skill: test planning, review, fix plans (provider-agnostic)
+│   ├── db-state-machine.ts # DB lifecycle state transitions (canTransition, transitionDbStatus)
+│   ├── db-setup-runner.ts  # DB setup pipeline runner (env parsing, migration prereqs)
 │   ├── test-runner.ts    # Test execution
 │   ├── workflow-logger.ts # Persistent logging (test-planning, test-review stages)
 │   ├── plan-storage.ts   # Consensus docs storage (per-app feedback)
@@ -1498,9 +1593,11 @@ src/
 │   └── auto-fix.ts       # Automatic error fixing (enhanced ENOENT tracking)
 └── types/                # TypeScript types
     ├── project.ts        # OutputLanguage, isWorkspace(), flexible OpenAIModelSchema
-    ├── workflow.ts       # ProjectStateSchema (qaEnabled, qa* task fields)
+    ├── workflow.ts       # ProjectStateSchema (qaEnabled, dbConfig, qa* task fields)
     ├── consensus.ts      # GeminiModelSchema, GrokModelSchema, reviewerPersona, testPlanThreshold
     ├── tester.ts         # TestVerdict, TestPlanOutput, TestRunReview, TestFixPlan
+    ├── database.ts       # DbStatus, DbMode, DbConfig, DbSetupStep Zod schemas
+    ├── database-runtime.ts # SetupStepResult, ReadinessCheck runtime schemas
     └── website-strategy.ts # WebsiteStrategyDocument, BrandAssetsContract, DesignTokens
 ```
 

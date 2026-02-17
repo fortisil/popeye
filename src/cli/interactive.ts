@@ -844,6 +844,8 @@ function showHelp(): void {
     ['/new <idea>', 'Force start a new project (skips existing check)'],
     ['/resume', 'Resume interrupted project'],
     ['/overview [fix]', 'Project review with analysis; fix to auto-discover docs'],
+    ['/db [action]', 'Database management (status/configure/apply)'],
+    ['/doctor', 'Run database and project readiness checks'],
     ['/clear', 'Clear screen'],
     ['/exit', 'Exit Popeye'],
   ];
@@ -1012,6 +1014,14 @@ async function handleInput(input: string, state: SessionState): Promise<boolean>
         }
         break;
 
+      case '/db':
+        await handleDbSlashCommand(state, args);
+        break;
+
+      case '/doctor':
+        await handleDoctorSlashCommand(state);
+        break;
+
       default:
         printError(`Unknown command: ${cmd}`);
         printInfo('Type /help for available commands');
@@ -1053,6 +1063,98 @@ async function handleStatus(state: SessionState): Promise<void> {
 
   const summary = await getWorkflowSummary(state.projectDir);
   console.log(summary);
+}
+
+/**
+ * Handle /db slash command - database management
+ */
+async function handleDbSlashCommand(state: SessionState, args: string[]): Promise<void> {
+  if (!state.projectDir) {
+    printError('No active project. Create or resume a project first.');
+    return;
+  }
+
+  const action = args[0] || 'status';
+
+  switch (action) {
+    case 'status': {
+      try {
+        const { loadProject } = await import('../state/index.js');
+        const { DEFAULT_DB_CONFIG } = await import('../types/database.js');
+        const projectState = await loadProject(state.projectDir);
+        const dbConfig = projectState.dbConfig || { ...DEFAULT_DB_CONFIG, designed: false };
+
+        console.log();
+        printInfo('Database Status:');
+        console.log(`  Designed:     ${dbConfig.designed ? 'Yes' : 'No'}`);
+        console.log(`  Status:       ${dbConfig.status}`);
+        console.log(`  Mode:         ${dbConfig.mode || 'not set'}`);
+        console.log(`  Vector:       ${dbConfig.vectorRequired ? 'Yes' : 'No'}`);
+        console.log(`  Migrations:   ${dbConfig.migrationsApplied}`);
+        if (dbConfig.lastError) {
+          printError(`  Last Error:   ${dbConfig.lastError}`);
+        }
+        console.log();
+      } catch (err) {
+        printError(err instanceof Error ? err.message : 'Failed to load project state');
+      }
+      break;
+    }
+    case 'configure': {
+      printInfo('Use "popeye db configure" from the CLI for interactive configuration.');
+      printInfo('Or set DATABASE_URL in apps/backend/.env manually.');
+      break;
+    }
+    case 'apply': {
+      printInfo('Use "popeye db apply" from the CLI to run the setup pipeline.');
+      break;
+    }
+    default:
+      printError(`Unknown db action: ${action}`);
+      printInfo('Usage: /db [status|configure|apply]');
+  }
+}
+
+/**
+ * Handle /doctor slash command - readiness checks
+ */
+async function handleDoctorSlashCommand(state: SessionState): Promise<void> {
+  if (!state.projectDir) {
+    printError('No active project. Create or resume a project first.');
+    return;
+  }
+
+  try {
+    const { runDoctorChecks } = await import('./commands/doctor.js');
+
+    console.log();
+    printInfo('Running readiness checks...');
+    console.log();
+
+    const result = await runDoctorChecks(state.projectDir);
+
+    for (const check of result.checks) {
+      const label = check.passed ? '[PASS]' : check.severity === 'info' ? '[SKIP]' : '[FAIL]';
+      if (check.passed) {
+        printSuccess(`  ${label} ${check.name}: ${check.message}`);
+      } else if (check.severity === 'info') {
+        printInfo(`  ${label} ${check.name}: ${check.message}`);
+      } else if (check.severity === 'warning') {
+        printWarning(`  ${label} ${check.name}: ${check.message}`);
+      } else {
+        printError(`  ${label} ${check.name}: ${check.message}`);
+      }
+    }
+
+    console.log();
+    if (result.healthy) {
+      printSuccess('All critical checks passed.');
+    } else {
+      printWarning('Some critical checks failed. See above for details.');
+    }
+  } catch (err) {
+    printError(err instanceof Error ? err.message : 'Doctor checks failed');
+  }
 }
 
 /**

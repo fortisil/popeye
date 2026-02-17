@@ -101,6 +101,35 @@ export {
   type DiscoveredTestCommands,
 } from './tester.js';
 
+// Database types
+export {
+  DbStatusSchema,
+  DbModeSchema,
+  DbProviderSchema,
+  BackendOrmSchema,
+  DbSetupStepSchema,
+  DbConfigSchema,
+  DEFAULT_DB_CONFIG,
+  type DbStatus,
+  type DbMode,
+  type DbProvider,
+  type BackendOrm,
+  type DbSetupStep,
+  type DbConfig,
+} from './database.js';
+
+// Database runtime types
+export {
+  SetupStepResultSchema,
+  SetupResultSchema,
+  ReadinessCheckSchema,
+  ReadinessResultSchema,
+  type SetupStepResult,
+  type SetupResult,
+  type ReadinessCheck,
+  type ReadinessResult,
+} from './database-runtime.js';
+
 // CLI types
 export {
   EXIT_CODES,

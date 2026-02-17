@@ -9,7 +9,6 @@ import type { ProjectSpec } from '../types/project.js';
 import type { GenerationResult } from './python.js';
 import {
   generateWorkspaceJson,
-  generateRootDockerCompose,
   generateRootReadme,
   generateRootGitignore,
   generateFrontendReadme,
@@ -19,7 +18,6 @@ import {
   generateTailwindConfig,
   generatePostcssConfig,
   generateMainCss,
-  generateAppTsx,
   generateMainTsx,
   generateIndexHtml,
   generateFrontendPackageJson,
@@ -30,10 +28,15 @@ import {
   generateFrontendTest,
   generateVitestSetup,
   generateFrontendVitestConfig,
-  generateFastAPIMain,
   generateBackendDockerfile,
   generateFastAPIRequirements,
 } from './templates/fullstack.js';
+import { generateAppTsxWithAdmin } from './templates/admin-wizard-react.js';
+import { generateFastAPIMainWithAdmin } from './templates/admin-wizard-python.js';
+import { generateDockerComposeWithDb, generateDbEnvExample } from './templates/database-docker.js';
+import { generatePythonDatabaseLayer } from './database.js';
+import { getDatabaseFiles } from './database.js';
+import { generateAdminWizardLayer, getAdminWizardFiles } from './admin-wizard.js';
 
 /**
  * Options for fullstack project generation
@@ -112,11 +115,11 @@ export async function generateFullstackProject(
       // Docker
       {
         path: path.join(projectDir, 'infra', 'docker', 'docker-compose.yml'),
-        content: generateRootDockerCompose(projectName),
+        content: generateDockerComposeWithDb(projectName),
       },
       {
         path: path.join(projectDir, 'docker-compose.yml'),
-        content: generateRootDockerCompose(projectName),
+        content: generateDockerComposeWithDb(projectName),
       },
       // Documentation
       {
@@ -192,7 +195,7 @@ export async function generateFullstackProject(
       },
       {
         path: path.join(frontendDir, 'src', 'App.tsx'),
-        content: generateAppTsx(projectName),
+        content: generateAppTsxWithAdmin(projectName),
       },
       {
         path: path.join(frontendDir, 'src', 'index.css'),
@@ -228,7 +231,7 @@ export async function generateFullstackProject(
       // Environment
       {
         path: path.join(frontendDir, '.env.example'),
-        content: 'VITE_API_URL=http://localhost:8000\n',
+        content: 'VITE_API_URL=http://localhost:8000\nVITE_ADMIN_TOKEN=change-me-to-a-random-string\n',
       },
       {
         path: path.join(frontendDir, '.gitignore'),
@@ -265,7 +268,7 @@ export async function generateFullstackProject(
       },
       {
         path: path.join(backendDir, 'src', packageName, 'main.py'),
-        content: generateFastAPIMain(projectName),
+        content: generateFastAPIMainWithAdmin(projectName, packageName),
       },
       // Test files
       {
@@ -293,7 +296,7 @@ export async function generateFullstackProject(
       // Environment
       {
         path: path.join(backendDir, '.env.example'),
-        content: 'DEBUG=true\nDATABASE_URL=sqlite:///./data/app.db\n',
+        content: generateDbEnvExample(projectName),
       },
       {
         path: path.join(backendDir, '.gitignore'),
@@ -311,6 +314,16 @@ export async function generateFullstackProject(
       await writeFile(file.path, file.content);
       filesCreated.push(file.path);
     }
+
+    // Generate database layer (SQLAlchemy + Alembic + pgvector)
+    const dbFiles = await generatePythonDatabaseLayer(
+      projectDir, projectName, packageName, { includeVector: true }
+    );
+    filesCreated.push(...dbFiles);
+
+    // Generate admin wizard layer (middleware + routes + React components)
+    const adminFiles = await generateAdminWizardLayer(projectDir, packageName);
+    filesCreated.push(...adminFiles);
 
     return {
       success: true,
@@ -520,6 +533,10 @@ export function getFullstackProjectFiles(projectName: string): string[] {
     'apps/backend/.env.example',
     'apps/backend/.gitignore',
     'apps/backend/Makefile',
+    // Database layer
+    ...getDatabaseFiles(packageName, 'sqlalchemy'),
+    // Admin wizard layer
+    ...getAdminWizardFiles(packageName),
   ];
 }
 

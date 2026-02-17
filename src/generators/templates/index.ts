@@ -14,3 +14,8 @@ export * as websiteLandingTemplates from './website-landing.js';
 export * as websitePricingTemplates from './website-pricing.js';
 export * as websiteLayoutTemplates from './website-layout.js';
 export * as websiteSectionTemplates from './website-sections.js';
+export * as databasePythonTemplates from './database-python.js';
+export * as databaseTypescriptTemplates from './database-typescript.js';
+export * as databaseDockerTemplates from './database-docker.js';
+export * as adminWizardPythonTemplates from './admin-wizard-python.js';
+export * as adminWizardReactTemplates from './admin-wizard-react.js';

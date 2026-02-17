@@ -15,6 +15,9 @@ import type {
 } from '../types/workflow.js';
 import type { ConsensusIteration } from '../types/consensus.js';
 import type { ProjectSpec } from '../types/project.js';
+import { isWorkspace } from '../types/project.js';
+import { DEFAULT_DB_CONFIG } from '../types/database.js';
+import type { DbConfig } from '../types/database.js';
 import {
   loadState,
   saveState,
@@ -62,6 +65,11 @@ export async function createProject(
     updatedAt: now,
     qaEnabled: true,
   };
+
+  // Set default DB config for workspace projects (fullstack / all)
+  if (isWorkspace(spec.language)) {
+    state.dbConfig = { ...DEFAULT_DB_CONFIG };
+  }
 
   await saveState(projectDir, state);
 
@@ -393,6 +401,26 @@ export async function storeWebsiteStrategyPath(
   strategyPath: string
 ): Promise<ProjectState> {
   return updateState(projectDir, { websiteStrategy: strategyPath });
+}
+
+/**
+ * Update database configuration with partial updates
+ * Merges partial DbConfig updates into the existing config
+ *
+ * @param projectDir - The project root directory
+ * @param updates - Partial DbConfig updates to merge
+ * @returns The updated project state
+ */
+export async function updateDbConfig(
+  projectDir: string,
+  updates: Partial<DbConfig>
+): Promise<ProjectState> {
+  const current = await loadProject(projectDir);
+  const currentDbConfig = current.dbConfig || { ...DEFAULT_DB_CONFIG };
+
+  return updateState(projectDir, {
+    dbConfig: { ...currentDbConfig, ...updates },
+  });
 }
 
 /**

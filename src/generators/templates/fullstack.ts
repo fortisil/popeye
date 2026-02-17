@@ -212,6 +212,35 @@ cd apps/frontend && npm run lint
 cd apps/backend && ruff check .
 \`\`\`
 
+## Database
+
+Database is **UNCONFIGURED** by default. The app runs without a database in limited mode.
+
+### Local Docker (recommended for development)
+
+\`\`\`bash
+# docker-compose starts PostgreSQL automatically
+docker-compose up
+\`\`\`
+
+### Managed Database
+
+Set \`DATABASE_URL\` in \`apps/backend/.env\` to connect to a managed PostgreSQL instance (Neon, Supabase, etc.).
+
+### Health Check
+
+\`\`\`bash
+# Check database connectivity and migration status
+curl http://localhost:8000/health/db
+\`\`\`
+
+### Migrations
+
+\`\`\`bash
+cd apps/backend
+alembic upgrade head
+\`\`\`
+
 ## Apps
 
 ### Frontend (apps/frontend)

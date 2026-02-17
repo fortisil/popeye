@@ -16,6 +16,9 @@ import {
   generateUiPackage as generateUiPackageImpl,
 } from './shared-packages.js';
 import type { BrandColorOptions } from './shared-packages.js';
+import { generateAllDockerComposeWithDb } from './templates/database-docker.js';
+import { getAdminWizardFiles } from './admin-wizard.js';
+import { getDatabaseFiles } from './database.js';
 
 /**
  * Options for all project generation
@@ -479,14 +482,14 @@ export async function generateAllProject(
         path: path.join(projectDir, '.popeye', 'workspace.json'),
         content: generateAllWorkspaceJson(projectName),
       },
-      // Docker compose (override to include website)
+      // Docker compose (override to include website + postgres)
       {
         path: path.join(projectDir, 'docker-compose.yml'),
-        content: generateAllDockerCompose(projectName),
+        content: generateAllDockerComposeWithDb(projectName),
       },
       {
         path: path.join(projectDir, 'infra', 'docker', 'docker-compose.yml'),
-        content: generateAllDockerCompose(projectName),
+        content: generateAllDockerComposeWithDb(projectName),
       },
       // README
       {
@@ -562,6 +565,10 @@ export function getAllProjectFiles(projectName: string): string[] {
     'packages/ui/src/button.tsx',
     'packages/ui/src/card.tsx',
     'packages/contracts/.gitkeep',
+    // Database layer
+    ...getDatabaseFiles(packageName, 'sqlalchemy'),
+    // Admin wizard layer
+    ...getAdminWizardFiles(packageName),
   ];
 }
 

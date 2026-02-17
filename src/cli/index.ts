@@ -15,6 +15,8 @@ import {
   createResetCommand,
   createCancelCommand,
   createConfigCommand,
+  createDbCommand,
+  createDoctorCommand,
 } from './commands/index.js';
 import { startInteractiveMode } from './interactive.js';
 import { printError } from './output.js';
@@ -54,6 +56,8 @@ export function createProgram(): Command {
   program.addCommand(createResetCommand());
   program.addCommand(createCancelCommand());
   program.addCommand(createConfigCommand());
+  program.addCommand(createDbCommand());
+  program.addCommand(createDoctorCommand());
 
   // Interactive mode command
   program

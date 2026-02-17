@@ -55,6 +55,8 @@ export * from './workspace-manager.js';
 export * from './website-updater.js';
 export * from './website-strategy.js';
 export * from './overview.js';
+export * from './db-state-machine.js';
+export * from './db-setup-runner.js';
 
 /**
  * Workflow options

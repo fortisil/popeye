@@ -8,3 +8,5 @@ export { createCreateCommand } from './create.js';
 export { createStatusCommand, createValidateCommand, createSummaryCommand } from './status.js';
 export { createResumeCommand, createResetCommand, createCancelCommand } from './resume.js';
 export { createConfigCommand } from './config.js';
+export { createDbCommand } from './db.js';
+export { createDoctorCommand } from './doctor.js';

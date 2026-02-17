@@ -9,6 +9,8 @@ import type { OutputLanguage, OpenAIModel } from './project.js';
 import type { ConsensusIteration } from './consensus.js';
 import type { TestPlanOutput } from './tester.js';
 import { TestPlanOutputSchema, TestVerdictSchema } from './tester.js';
+import type { DbConfig } from './database.js';
+import { DbConfigSchema } from './database.js';
 
 /**
  * Workflow phases
@@ -230,6 +232,8 @@ export interface ProjectState {
   sourceDocPaths?: string[];
   /** Whether QA Tester skill is active (default: true for new projects, undefined/false for existing) */
   qaEnabled?: boolean;
+  /** Database configuration tracking (workspace projects only) */
+  dbConfig?: DbConfig;
 }
 
 /**
@@ -276,6 +280,7 @@ export const ProjectStateSchema = z.object({
   strategyError: z.string().optional(),
   sourceDocPaths: z.array(z.string()).optional(),
   qaEnabled: z.boolean().optional(),
+  dbConfig: DbConfigSchema.optional(),
 });
 
 /**
