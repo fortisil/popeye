@@ -26,7 +26,8 @@ Popeye is an autonomous software development agent that takes a simple project i
 9. **Scans** generated website files for placeholder fingerprints (TODO comments, lorem ipsum, default tiers) and reports quality warnings
 10. **Styles** the application with a professional design system and component library
 11. **Tests** the implementation and fixes issues automatically with Tester-driven fix plans
-12. **Delivers** a complete, working project with polished UI
+12. **Reviews** the completed project with a post-build audit that scores code quality, detects wiring issues, and generates recovery tasks
+13. **Delivers** a complete, working project with polished UI
 
 ## How It Works
 
@@ -435,6 +436,7 @@ Popeye provides real-time feedback:
   - How to run (development, tests, production)
   - Project structure overview
 - **Project Type Upgrade**: Upgrade projects in-place (e.g., python to fullstack, fullstack to all) with automatic file restructuring, scaffolding, and planning integration
+- **Post-Build Audit/Review**: Run `popeye review` to scan your completed project, score it across 8 categories, detect FE-BE wiring issues, and auto-generate recovery milestones for critical findings
 - **Flexible Model Switching**: Use any AI model name for OpenAI, Gemini, or Grok providers -- not limited to a predefined list
 
 ### Automatic UI/UX Design
@@ -895,6 +897,40 @@ popeye config set consensus.threshold 90
 popeye config reset
 ```
 
+### `popeye review` (alias: `audit`)
+
+Run a post-build audit/review of the project. Scans the codebase, produces a structured report with findings and scores, and optionally generates recovery milestones.
+
+```bash
+# Standard audit
+popeye review ./my-project
+
+# Deep audit with strict mode
+popeye review ./my-project --depth 3 --strict
+
+# JSON only, no auto-recovery
+popeye review ./my-project --format json --no-recover
+
+# Audit only the frontend component
+popeye review ./my-project --target frontend
+```
+
+**Options:**
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-d, --depth <level>` | Audit depth: `1`=shallow, `2`=standard, `3`=deep | `2` |
+| `-s, --strict` | Enable strict mode (higher standards) | `false` |
+| `-f, --format <type>` | Output format: `json`, `md`, `both` | `both` |
+| `--no-recover` | Skip auto-injection of recovery milestones | Recovery on |
+| `-t, --target <kind>` | Audit target: `all`, `frontend`, `backend`, `website` | `all` |
+
+The audit runs three stages:
+1. **Scan** -- Deterministic filesystem scan (files, LOC, dependencies, FE-BE wiring matrix)
+2. **Analyze** -- AI-powered analysis producing scored findings across 8 categories
+3. **Recovery** -- Evidence-based recovery plan generation when critical/major findings exist
+
+Reports are written to `.popeye/popeye.audit.md`, `.popeye/popeye.audit.json`, and optionally `.popeye/popeye.recovery.md`/`.json`. Recovery milestones are injected into the project state and can be executed with `popeye resume`.
+
 ### Interactive Mode
 
 Launch an interactive REPL session:
@@ -922,6 +958,7 @@ popeye
 /overview [fix]            Project review with analysis; fix to auto-discover docs
 /db [action]               Database management (status/configure/apply)
 /doctor                    Run database and project readiness checks
+/review                    Run post-build audit with findings and recovery
 /info                      Show system info (Claude CLI status, API keys, etc.)
 /clear                     Clear screen
 /exit                      Exit interactive mode
@@ -1522,7 +1559,8 @@ src/
 │   ├── interactive.ts    # REPL mode (with /model, /upgrade, /overview, /db, /doctor commands)
 │   └── commands/         # Individual commands
 │       ├── db.ts         # Database management CLI (status/configure/apply)
-│       └── doctor.ts     # Readiness checks (8 checks for DB and project health)
+│       ├── doctor.ts     # Readiness checks (8 checks for DB and project health)
+│       └── review.ts     # Post-build audit/review CLI command
 ├── adapters/             # AI service adapters
 │   ├── claude.ts         # Claude Agent SDK (with rate limiting)
 │   ├── openai.ts         # OpenAI API (default reviewer, marketing persona for websites)
@@ -1590,12 +1628,18 @@ src/
 │   ├── project-verification.ts # Project quality checks
 │   ├── project-structure.ts    # Project directory scanner
 │   ├── remediation.ts    # Consensus-driven failure recovery
-│   └── auto-fix.ts       # Automatic error fixing (enhanced ENOENT tracking)
+│   ├── auto-fix.ts       # Automatic error fixing (enhanced ENOENT tracking)
+│   ├── audit-scanner.ts  # Deterministic project scanning (components, wiring, docs)
+│   ├── audit-analyzer.ts # AI-powered analysis with Serena-first search
+│   ├── audit-reporter.ts # Markdown + JSON report generation
+│   ├── audit-recovery.ts # Evidence-based recovery plan generation
+│   └── audit-mode.ts     # Audit orchestrator (scan -> analyze -> recover)
 └── types/                # TypeScript types
     ├── project.ts        # OutputLanguage, isWorkspace(), flexible OpenAIModelSchema
     ├── workflow.ts       # ProjectStateSchema (qaEnabled, dbConfig, qa* task fields)
     ├── consensus.ts      # GeminiModelSchema, GrokModelSchema, reviewerPersona, testPlanThreshold
     ├── tester.ts         # TestVerdict, TestPlanOutput, TestRunReview, TestFixPlan
+    ├── audit.ts          # Audit system schemas (findings, recovery, wiring, scores)
     ├── database.ts       # DbStatus, DbMode, DbConfig, DbSetupStep Zod schemas
     ├── database-runtime.ts # SetupStepResult, ReadinessCheck runtime schemas
     └── website-strategy.ts # WebsiteStrategyDocument, BrandAssetsContract, DesignTokens

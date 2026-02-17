@@ -17,6 +17,7 @@ import {
   createConfigCommand,
   createDbCommand,
   createDoctorCommand,
+  createReviewCommand,
 } from './commands/index.js';
 import { startInteractiveMode } from './interactive.js';
 import { printError } from './output.js';
@@ -58,6 +59,7 @@ export function createProgram(): Command {
   program.addCommand(createConfigCommand());
   program.addCommand(createDbCommand());
   program.addCommand(createDoctorCommand());
+  program.addCommand(createReviewCommand());
 
   // Interactive mode command
   program

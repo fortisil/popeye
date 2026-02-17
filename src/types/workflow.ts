@@ -234,6 +234,16 @@ export interface ProjectState {
   qaEnabled?: boolean;
   /** Database configuration tracking (workspace projects only) */
   dbConfig?: DbConfig;
+  /** Path to most recent audit report JSON (relative to .popeye/) */
+  auditReportPath?: string;
+  /** Path to most recent audit summary JSON */
+  auditSummaryPath?: string;
+  /** Whether recovery milestones from audit are being executed */
+  auditRecoveryInProgress?: boolean;
+  /** ISO timestamp of last audit run */
+  auditLastRunAt?: string;
+  /** Unique identifier for the audit run */
+  auditRunId?: string;
 }
 
 /**
@@ -281,6 +291,11 @@ export const ProjectStateSchema = z.object({
   sourceDocPaths: z.array(z.string()).optional(),
   qaEnabled: z.boolean().optional(),
   dbConfig: DbConfigSchema.optional(),
+  auditReportPath: z.string().optional(),
+  auditSummaryPath: z.string().optional(),
+  auditRecoveryInProgress: z.boolean().optional(),
+  auditLastRunAt: z.string().optional(),
+  auditRunId: z.string().optional(),
 });
 
 /**

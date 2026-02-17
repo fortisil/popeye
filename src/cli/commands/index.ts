@@ -10,3 +10,4 @@ export { createResumeCommand, createResetCommand, createCancelCommand } from './
 export { createConfigCommand } from './config.js';
 export { createDbCommand } from './db.js';
 export { createDoctorCommand } from './doctor.js';
+export { createReviewCommand } from './review.js';

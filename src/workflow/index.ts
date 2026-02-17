@@ -57,6 +57,11 @@ export * from './website-strategy.js';
 export * from './overview.js';
 export * from './db-state-machine.js';
 export * from './db-setup-runner.js';
+export * from './audit-scanner.js';
+export * from './audit-analyzer.js';
+export * from './audit-reporter.js';
+export * from './audit-recovery.js';
+export * from './audit-mode.js';
 
 /**
  * Workflow options

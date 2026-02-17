@@ -203,6 +203,34 @@ popeye-cli doctor ./my-project
 
 ---
 
+### `popeye-cli review [directory]` (alias: `audit`)
+
+Run a post-build audit/review of the project. Scans the codebase, produces a structured report with findings, and optionally generates recovery milestones.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-d, --depth <level>` | Audit depth: `1`=shallow, `2`=standard, `3`=deep | `2` |
+| `-s, --strict` | Enable strict mode (higher standards, stricter recovery triggers) | `false` |
+| `-f, --format <type>` | Output format: `json`, `md`, `both` | `both` |
+| `--no-recover` | Skip auto-injection of recovery milestones | Recovery enabled by default |
+| `-t, --target <kind>` | Audit target: `all`, `frontend`, `backend`, `website` | `all` |
+
+The audit runs three stages:
+1. **Scan** -- Deterministic filesystem scan (files, LOC, deps, wiring matrix)
+2. **Analyze** -- AI-powered analysis producing scored findings
+3. **Recovery** -- Evidence-based recovery plan generation (if critical/major findings exist)
+
+Reports are written to `.popeye/popeye.audit.md`, `.popeye/popeye.audit.json`, and optionally `.popeye/popeye.recovery.md`/`.json`.
+
+```bash
+popeye-cli review ./my-project
+popeye-cli review ./my-project --depth 3 --strict
+popeye-cli review ./my-project --format json --no-recover
+popeye-cli audit ./my-project --target frontend
+```
+
+---
+
 ## Interactive Mode Slash Commands
 
 Enter these commands during an interactive session (started via `popeye-cli interactive`).
@@ -287,6 +315,7 @@ Available upgrade paths depend on the current project type:
 | `/db configure` | Configure database (redirects to CLI) |
 | `/db apply` | Apply database setup (redirects to CLI) |
 | `/doctor` | Run all readiness checks inline |
+| `/review`, `/audit` | Run a post-build audit with findings and optional recovery |
 
 ### Session Control
 
@@ -401,6 +430,10 @@ popeye-cli db apply ./taskmaster
 
 # Resume after interruption
 popeye-cli resume ./taskmaster
+
+# Audit the project after build
+popeye-cli review ./taskmaster
+popeye-cli review ./taskmaster --depth 3 --strict
 
 # Reset and re-plan
 popeye-cli reset ./taskmaster --phase plan

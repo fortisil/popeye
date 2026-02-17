@@ -846,6 +846,7 @@ function showHelp(): void {
     ['/overview [fix]', 'Project review with analysis; fix to auto-discover docs'],
     ['/db [action]', 'Database management (status/configure/apply)'],
     ['/doctor', 'Run database and project readiness checks'],
+    ['/review', 'Run post-build audit/review with findings and recovery'],
     ['/clear', 'Clear screen'],
     ['/exit', 'Exit Popeye'],
   ];
@@ -1022,6 +1023,11 @@ async function handleInput(input: string, state: SessionState): Promise<boolean>
         await handleDoctorSlashCommand(state);
         break;
 
+      case '/review':
+      case '/audit':
+        await handleReviewSlashCommand(state, args);
+        break;
+
       default:
         printError(`Unknown command: ${cmd}`);
         printInfo('Type /help for available commands');
@@ -1154,6 +1160,51 @@ async function handleDoctorSlashCommand(state: SessionState): Promise<void> {
     }
   } catch (err) {
     printError(err instanceof Error ? err.message : 'Doctor checks failed');
+  }
+}
+
+/**
+ * Handle /review or /audit slash command - post-build project audit
+ */
+async function handleReviewSlashCommand(state: SessionState, args: string[] = []): Promise<void> {
+  if (!state.projectDir) {
+    printError('No active project. Create or resume a project first.');
+    return;
+  }
+
+  // Parse CLI-style flags from args
+  const options: {
+    depth?: number;
+    strict?: boolean;
+    format?: 'json' | 'md' | 'both';
+    recover?: boolean;
+    target?: string;
+  } = {};
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if ((arg === '--depth' || arg === '-d') && args[i + 1]) {
+      options.depth = parseInt(args[++i], 10);
+    } else if (arg === '--strict' || arg === '-s') {
+      options.strict = true;
+    } else if ((arg === '--format' || arg === '-f') && args[i + 1]) {
+      options.format = args[++i] as 'json' | 'md' | 'both';
+    } else if (arg === '--no-recover') {
+      options.recover = false;
+    } else if (arg === '--recover') {
+      options.recover = true;
+    } else if ((arg === '--target' || arg === '-t') && args[i + 1]) {
+      options.target = args[++i];
+    }
+  }
+
+  try {
+    const { runReview } = await import('./commands/review.js');
+
+    console.log();
+    await runReview(state.projectDir, options);
+  } catch (err) {
+    printError(err instanceof Error ? err.message : 'Audit failed');
   }
 }
 
@@ -1836,11 +1887,27 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
     return;
   }
 
-  // Discover all projects (registered + scanned in current directory)
-  console.log();
-  printInfo('Scanning for projects...');
+  // Reason: If there's already an active project with pending work (e.g., from /review recovery),
+  // skip project discovery and go straight to resuming.
+  if (state.projectDir) {
+    const activeStatus = await getWorkflowStatus(state.projectDir);
+    if (activeStatus.exists && activeStatus.state) {
+      const { phase, status: pStatus } = activeStatus.state;
+      const hasPendingWork = phase !== 'complete' || pStatus !== 'complete';
+      if (hasPendingWork) {
+        printInfo(`Resuming active project: ${activeStatus.state.name}`);
+        // Fall through to the resume logic below (skip discovery)
+      }
+    }
+  }
 
-  const { all: allProjects } = await discoverProjects(state.projectDir || process.cwd());
+  // Only discover projects if no active project with pending work
+  if (!state.projectDir || (await getWorkflowStatus(state.projectDir)).state?.phase === 'complete') {
+    // Discover all projects (registered + scanned in current directory)
+    console.log();
+    printInfo('Scanning for projects...');
+
+    const { all: allProjects } = await discoverProjects(state.projectDir || process.cwd());
 
   // If projects found, let user select one
   if (allProjects.length > 0) {
@@ -1917,6 +1984,7 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
     console.log();
     printInfo(`Selected: ${selectedProject.name}`);
   }
+  } // end: project discovery block
 
   // Now check for formal project state at the selected/current directory
   if (!state.projectDir) {
