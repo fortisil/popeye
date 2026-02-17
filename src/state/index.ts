@@ -60,6 +60,7 @@ export async function createProject(
     consensusHistory: [],
     createdAt: now,
     updatedAt: now,
+    qaEnabled: true,
   };
 
   await saveState(projectDir, state);

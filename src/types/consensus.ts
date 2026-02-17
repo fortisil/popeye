@@ -91,6 +91,8 @@ export interface ConsensusConfig {
   additionalReviewers?: AIProvider[];
   /** Custom reviewer persona for domain-specific reviews (e.g., marketing strategist for website projects) */
   reviewerPersona?: string;
+  /** Consensus threshold for test plans (default: 90, lower than code plan threshold) */
+  testPlanThreshold?: number;
 }
 
 /**
@@ -153,6 +155,7 @@ export const ConsensusConfigSchema = z.object({
   temperature: z.number().min(0).max(2).default(0.3),
   maxTokens: z.number().min(100).max(32000).default(4096),
   reviewerPersona: z.string().optional(),
+  testPlanThreshold: z.number().min(0).max(100).optional(),
 });
 
 /**

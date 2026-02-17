@@ -22,10 +22,11 @@ Popeye is an autonomous software development agent that takes a simple project i
 5. **Plans** a complete development roadmap with milestones and tasks
 6. **Validates** the plan through AI consensus (multiple AI systems must agree)
 7. **Implements** each task autonomously, writing production-quality code
-8. **Scans** generated website files for placeholder fingerprints (TODO comments, lorem ipsum, default tiers) and reports quality warnings
-9. **Styles** the application with a professional design system and component library
-10. **Tests** the implementation and fixes issues automatically
-11. **Delivers** a complete, working project with polished UI
+8. **QA Gates** each task through an independent Tester that plans tests, reviews results, and issues PASS/FAIL verdicts
+9. **Scans** generated website files for placeholder fingerprints (TODO comments, lorem ipsum, default tiers) and reports quality warnings
+10. **Styles** the application with a professional design system and component library
+11. **Tests** the implementation and fixes issues automatically with Tester-driven fix plans
+12. **Delivers** a complete, working project with polished UI
 
 ## How It Works
 
@@ -61,12 +62,16 @@ Popeye is an autonomous software development agent that takes a simple project i
 │                                                           │              │
 │                                                           ▼              │
 │                  ┌────────────────────────────────────────────┐          │
-│                  │      EXECUTION MODE                        │          │
+│                  │      EXECUTION MODE (7-Phase Task Workflow) │          │
 │                  │  For each task:                             │          │
-│                  │    1. Claude implements                     │          │
-│                  │    2. Tests run automatically               │          │
-│                  │    3. Fix issues (up to 3 retries)          │          │
-│                  │    4. Mark complete                         │          │
+│                  │    1. Coder creates implementation plan     │          │
+│                  │    2. Code plan consensus (95%+)            │          │
+│                  │    3. Tester creates test plan (QA)         │          │
+│                  │    4. Test plan consensus (90%+)            │          │
+│                  │    5. Claude implements code                │          │
+│                  │    6. Tests run automatically               │          │
+│                  │    7. Tester reviews results (QA verdict)   │          │
+│                  │    Fix issues via Tester fix plans          │          │
 │                  └────────────────────────────────────────────┘          │
 │                                                           │              │
 │                                                           ▼              │
@@ -107,7 +112,7 @@ Popeye uses multiple AI systems that must agree before implementation begins:
 - **Google Gemini** (optional): Can be configured as reviewer or arbitrator when consensus gets stuck
 - **xAI Grok** (optional): Can be configured as reviewer or arbitrator as an alternative to Gemini
 
-Plans are iteratively refined until systems reach **95%+ consensus**, ensuring well-thought-out implementations. When consensus cannot be reached, an arbitrator (configurable) makes the final decision.
+Plans are iteratively refined until systems reach **95%+ consensus**, ensuring well-thought-out implementations. Test plans go through a separate consensus round at a configurable threshold (default **90%+**). When consensus cannot be reached, an arbitrator (configurable) makes the final decision.
 
 ---
 
@@ -121,7 +126,7 @@ Instead of a single "genius" model, Popeye operates as a **virtual AI developmen
 
 Every decision is recorded. Every disagreement is traceable. Nothing happens silently.
 
-### The Three Roles
+### The Four Roles
 
 #### 1. Planner & Builder (The Implementer)
 
@@ -162,16 +167,38 @@ The Arbitrator:
 Think of this role as:
 > *A tech lead making the call after a heated design review.*
 
+#### 4. Tester (The QA Gate)
+
+This role is the **independent quality authority**. It does not implement code -- it validates it.
+
+It:
+- designs structured test plans with acceptance criteria and risk focus areas
+- discovers project test infrastructure (package.json scripts, pytest, Makefile targets)
+- reviews test execution results against the approved test plan
+- issues a verdict: PASS, PASS_WITH_NOTES, or FAIL
+- creates fix plans with root cause analysis when tests fail
+- documents all test plans and reviews in `docs/qa/`
+
+Think of this role as:
+> *A dedicated QA engineer who cannot be overridden by the developer.*
+
+The Tester is provider-agnostic and uses whichever AI provider is configured. Its test plans go through their own consensus round (default threshold: 90%). ONLY the Tester decides whether code passes quality gates -- the coder cannot bypass or override a FAIL verdict.
+
 ### How the Loop Works
 
 ```
 1. You describe your idea
-2. Planner generates a spec and implementation
-3. Reviewer audits the plan and code
-4. If the Reviewer approves → continue
-5. If the Reviewer objects → feedback is sent back
-6. If disagreement persists → Arbitrator decides
-7. Final decision is applied and logged
+2. Planner generates a spec and implementation plan
+3. Reviewer audits the code plan (95%+ consensus)
+4. If the Reviewer approves → Tester designs a test plan
+5. Reviewer audits the test plan (90%+ consensus)
+6. If the Reviewer objects → feedback is sent back for revision
+7. If disagreement persists → Arbitrator decides
+8. Planner implements the code
+9. Tests run automatically
+10. Tester reviews results and issues PASS/FAIL verdict
+11. If FAIL → Tester creates fix plan → coder fixes → retest
+12. Final decisions are applied and logged
 ```
 
 No silent overrides. No "AI magic happened here".
@@ -369,7 +396,14 @@ Popeye provides real-time feedback:
 [Consensus] Review round 2: 92% agreement
 [Consensus] Review round 3: 97% agreement - APPROVED
 [Execute] Milestone 1: Project Setup
-[Execute]   Task 1.1: Initialize project structure... DONE
+[Execute]   Task 1.1: Code plan created
+[Consensus]   Code plan consensus: 96% - APPROVED
+[QA]   Tester designing test plan...
+[Consensus]   Test plan consensus: 92% - APPROVED
+[Execute]   Task 1.1: Implementing...
+[QA]   Running tests... 12 passed, 0 failed
+[QA]   Tester verdict: PASS
+[Execute]   Task 1.1: DONE
 [Execute]   Task 1.2: Configure dependencies... DONE
 [Execute] Milestone 2: Core Implementation
 ...
@@ -382,17 +416,18 @@ Popeye provides real-time feedback:
 [Complete] Project built successfully!
 ```
 
-**Note:** The `[Website Strategy]`, `[Validation]`, and `[Content Scan]` steps appear only for `website` and `all` project types. The marketing strategist persona for consensus review is also specific to website projects. Validation warnings are informational and do not block generation (except in direct `website.ts` generation, where blocking issues cause an error).
+**Note:** The `[Website Strategy]`, `[Validation]`, and `[Content Scan]` steps appear only for `website` and `all` project types. The marketing strategist persona for consensus review is also specific to website projects. Validation warnings are informational and do not block generation (except in direct `website.ts` generation, where blocking issues cause an error). The `[QA]` steps appear when QA is enabled (`qaEnabled: true`, the default for new projects). Existing projects without `qaEnabled` skip QA phases automatically.
 
 ## Features
 
 ### Core Features
 
 - **Fully Autonomous**: Runs from idea to complete project without manual intervention
-- **Dual-AI Consensus**: Plans validated by multiple AI systems before execution
+- **Dual-AI Consensus**: Both code plans and test plans validated by multiple AI systems before execution
 - **Multi-Language Support**: Generate projects in Python, TypeScript, Fullstack (React + FastAPI), Website, or ALL (React + FastAPI + Website)
-- **Automatic Testing**: Tests are generated and run for each implementation
-- **Error Recovery**: Failed tests trigger automatic fix attempts (up to 3 retries)
+- **Independent QA Tester**: A dedicated Tester persona plans tests, reviews results, and issues PASS/FAIL verdicts that the coder cannot override
+- **Automatic Testing**: Tests are generated and run for each implementation, gated by QA review
+- **Error Recovery**: Failed tests trigger Tester-authored fix plans with root cause analysis (up to 3 retries)
 - **Auto-Generated README**: At project completion, generates a comprehensive README with:
   - Project description and features
   - Prerequisites and installation instructions
@@ -606,6 +641,73 @@ The consensus system tracks approval separately for each app target:
   - Detects oscillation patterns (scores bouncing up and down)
   - 15-minute timeout with automatic arbitration
   - Per-iteration timing logs for debugging
+
+### QA Tester Skill
+
+Popeye includes a dedicated **Tester (QA) persona** that operates independently from the coder. The Tester is responsible for test quality and cannot be bypassed or overridden.
+
+#### 7-Phase Task Workflow
+
+When QA is enabled, each task goes through an expanded workflow:
+
+```
+1. Coder Plan       - AI creates a detailed implementation plan
+2. Code Consensus   - Reviewer validates the code plan (95%+ threshold)
+3. Test Plan        - Tester designs a structured test plan with acceptance criteria
+4. Test Consensus   - Reviewer validates the test plan (90%+ threshold, configurable)
+5. Implement        - Claude implements the code according to the approved plan
+6. Run Tests        - Test commands execute automatically
+7. QA Review        - Tester reviews results and issues PASS/FAIL/PASS_WITH_NOTES verdict
+```
+
+If the Tester issues a **FAIL** verdict, it creates a fix plan with root cause analysis that guides the coder's fix implementation. The cycle repeats until the Tester approves.
+
+#### Test Plan Structure
+
+The Tester produces structured test plans containing:
+
+| Field | Description |
+|-------|-------------|
+| **summary** | What risks the test plan targets |
+| **scope** | Components covered (frontend, backend, db, infra) |
+| **testMatrix** | Test cases with ID, category, acceptance criteria, priority |
+| **commands** | Exact shell commands with cwd, purpose, and required flag |
+| **riskFocus** | Top 3-7 risks being tested |
+| **minimumVerification** | Always includes build check, lint check, and smoke test |
+
+#### Test Infrastructure Discovery
+
+The Tester automatically discovers available test commands by inspecting:
+- `package.json` scripts (test, lint, build, typecheck)
+- `pyproject.toml` (pytest, ruff, mypy)
+- `Makefile` targets (test, lint, build)
+
+Language-specific defaults are used as fallbacks when no configuration is found.
+
+#### QA Documentation
+
+All QA artifacts are persisted for auditability:
+- **Test Plans**: `docs/qa/test-plans/milestone_N_task_N.md`
+- **Test Reviews**: `docs/qa/test-runs/milestone_N_task_N.md`
+
+Each document includes metadata (consensus score, iterations, timestamps) and the full plan or review content.
+
+#### QA Opt-in Behavior
+
+| Project Type | qaEnabled |
+|-------------|-----------|
+| New projects | `true` (default) |
+| Existing projects (pre-QA) | `undefined` (QA phases skipped) |
+| Manually disabled | `false` (QA phases skipped) |
+
+The `qaEnabled` field in `ProjectState` controls whether the 7-phase workflow is used. When QA is disabled, tasks use the original 4-phase flow (Plan -> Consensus -> Implement -> Test).
+
+#### Configurable Thresholds
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `consensus.threshold` | 95 | Code plan consensus threshold |
+| `consensus.testPlanThreshold` | 90 | Test plan consensus threshold (lower to avoid over-engineering test plans) |
 
 ### Observability Features
 
@@ -899,7 +1001,8 @@ Create `popeye.config.yaml` in your project or `~/.popeye/config.yaml` globally:
 ```yaml
 # Consensus settings
 consensus:
-  threshold: 95              # Minimum agreement percentage
+  threshold: 95              # Minimum agreement percentage (code plans)
+  test_plan_threshold: 90    # Minimum agreement percentage (test plans, lower to avoid over-engineering)
   max_iterations: 10         # Max revision rounds
   reviewer: openai           # Primary reviewer (openai, gemini, or grok)
   arbitrator: gemini         # Arbitrator when stuck (openai, gemini, grok, or off)
@@ -983,7 +1086,10 @@ my-project/
 │   └── conftest.py
 ├── docs/
 │   ├── PLAN.md              # Development plan
-│   └── WORKFLOW_LOG.md      # Execution log
+│   ├── WORKFLOW_LOG.md      # Execution log
+│   └── qa/                  # QA documentation (when qaEnabled)
+│       ├── test-plans/      # Approved test plans per task
+│       └── test-runs/       # Test review verdicts per task
 ├── pyproject.toml
 ├── requirements.txt
 ├── README.md
@@ -1072,6 +1178,9 @@ my-project/
 ├── docs/
 │   ├── PLAN.md                # Development plan with [FE], [BE], [INT] tags
 │   ├── WORKFLOW_LOG.md
+│   ├── qa/                    # QA documentation (when qaEnabled)
+│   │   ├── test-plans/        # Approved test plans per task
+│   │   └── test-runs/         # Test review verdicts per task
 │   └── plans/                 # Consensus documentation (fullstack/all projects)
 │       ├── master/
 │       │   ├── plan.md
@@ -1371,9 +1480,10 @@ src/
 │   ├── plan-mode.ts      # Planning phase (strategy generation, monorepo-aware)
 │   ├── execution-mode.ts # Execution phase
 │   ├── milestone-workflow.ts
-│   ├── task-workflow.ts  # Uses isWorkspace() for multi-app checks
+│   ├── task-workflow.ts  # 7-phase task workflow with QA gate
+│   ├── tester.ts         # QA skill: test planning, review, fix plans (provider-agnostic)
 │   ├── test-runner.ts    # Test execution
-│   ├── workflow-logger.ts # Persistent logging (website-strategy stage)
+│   ├── workflow-logger.ts # Persistent logging (test-planning, test-review stages)
 │   ├── plan-storage.ts   # Consensus docs storage (per-app feedback)
 │   ├── workspace-manager.ts # Multi-app workspace management
 │   ├── website-strategy.ts  # AI strategy generation, caching, staleness detection
@@ -1388,8 +1498,9 @@ src/
 │   └── auto-fix.ts       # Automatic error fixing (enhanced ENOENT tracking)
 └── types/                # TypeScript types
     ├── project.ts        # OutputLanguage, isWorkspace(), flexible OpenAIModelSchema
-    ├── workflow.ts       # ProjectStateSchema (websiteStrategy field)
-    ├── consensus.ts      # GeminiModelSchema, GrokModelSchema, reviewerPersona
+    ├── workflow.ts       # ProjectStateSchema (qaEnabled, qa* task fields)
+    ├── consensus.ts      # GeminiModelSchema, GrokModelSchema, reviewerPersona, testPlanThreshold
+    ├── tester.ts         # TestVerdict, TestPlanOutput, TestRunReview, TestFixPlan
     └── website-strategy.ts # WebsiteStrategyDocument, BrandAssetsContract, DesignTokens
 ```
 

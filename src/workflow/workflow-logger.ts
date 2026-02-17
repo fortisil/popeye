@@ -40,6 +40,8 @@ export type WorkflowStage =
   | 'ui-design'
   | 'ui-setup'
   | 'website-strategy'
+  | 'test-planning'
+  | 'test-review'
   | 'completion';
 
 /**

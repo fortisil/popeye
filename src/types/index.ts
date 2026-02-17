@@ -80,6 +80,27 @@ export {
   type ConsensusTrackingRecord,
 } from './consensus.js';
 
+// Tester (QA) types
+export {
+  TestVerdictSchema,
+  TestScopeSchema,
+  TestCommandSchema,
+  TestCaseSchema,
+  TestPlanOutputSchema,
+  TestRunReviewSchema,
+  FixStepSchema,
+  TestFixPlanSchema,
+  type TestVerdict,
+  type TestScope,
+  type TestCommand,
+  type TestCase,
+  type TestPlanOutput,
+  type TestRunReview,
+  type FixStep,
+  type TestFixPlan,
+  type DiscoveredTestCommands,
+} from './tester.js';
+
 // CLI types
 export {
   EXIT_CODES,

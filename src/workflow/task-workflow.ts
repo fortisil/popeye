@@ -8,6 +8,7 @@ import path from 'node:path';
 import { isWorkspace } from '../types/project.js';
 import type { ProjectState, Task, Milestone } from '../types/workflow.js';
 import type { ConsensusConfig } from '../types/consensus.js';
+import type { TestRunReview } from '../types/tester.js';
 import { createPlan as claudeCreatePlan } from '../adapters/claude.js';
 import {
   loadProject,
@@ -16,6 +17,14 @@ import {
 import { iterateUntilConsensus, runOptimizedConsensusProcess, type ConsensusProcessResult } from './consensus.js';
 import { executeTask as executeTaskCode, handleTestFailure } from './execution-mode.js';
 import { runTests, testsExist, getTestSummary, type TestResult } from './test-runner.js';
+import {
+  isQaEnabled,
+  runTestPlanningPhase,
+  runTestReviewPhase,
+  createTesterFixPlan,
+  documentTestPlan as documentQaTestPlan,
+  documentTestReview,
+} from './tester.js';
 
 /**
  * Options for task workflow
@@ -38,6 +47,10 @@ export interface TaskWorkflowResult {
   error?: string;
   /** True if workflow paused due to rate limiting (not a failure) */
   rateLimitPaused?: boolean;
+  /** Consensus result for the QA test plan (when QA enabled) */
+  testPlanConsensusResult?: ConsensusProcessResult;
+  /** Tester's post-run review (when QA enabled) */
+  testRunReview?: TestRunReview;
 }
 
 /**
@@ -81,15 +94,14 @@ Create a detailed implementation plan for the following task:
 ## Task: ${task.name}
 ${task.description}
 
-${task.testPlan ? `## Test Requirements\n${task.testPlan}` : ''}
-
 Please provide:
 1. **Implementation Steps**: Specific code changes needed
 2. **Files to Create/Modify**: List all files that will be touched
 3. **Dependencies**: Any packages or modules needed
 4. **Acceptance Criteria**: How to verify the task is complete
-5. **Test Plan**: Specific tests to write
+5. **Integration Points**: How this code connects with existing modules
 
+Do NOT include test planning -- a dedicated QA engineer will handle test design separately.
 Be specific and actionable. This plan will be reviewed for consensus before implementation.
 `.trim();
 
@@ -369,7 +381,9 @@ export async function runTaskWorkflow(
 
     // Check if we're resuming from a previous attempt
     const hasApprovedPlan = task.consensusApproved && task.plan;
+    const hasApprovedTestPlan = task.qaTestPlanApproved && task.qaTestPlanText;
     const hasCompletedImplementation = task.implementationComplete;
+    const qaActive = isQaEnabled(state);
 
     // Mark task as in-progress
     state = await updateTaskInState(projectDir, task.id, {
@@ -509,16 +523,83 @@ Task: ${task.name}
     }
 
     // ============================================
-    // PHASE 3: Implement the Task (skip if already complete)
+    // PHASE 3-4: Tester creates TestPlan + Consensus (only if QA enabled)
+    // ============================================
+    let testPlanConsensusResult: ConsensusProcessResult | undefined;
+
+    if (qaActive && !hasApprovedTestPlan) {
+      onProgress?.('test-planning', `Tester is designing test plan for: ${task.name}`);
+
+      const testPlanResult = await runTestPlanningPhase(
+        task, milestone, state, consensusResult.bestPlan,
+        { projectDir, consensusConfig, onProgress },
+      );
+
+      if (testPlanResult.error) {
+        state = await updateTaskInState(projectDir, task.id, {
+          status: 'failed',
+          error: testPlanResult.error,
+        });
+        return {
+          success: false,
+          task: { ...task, status: 'failed' },
+          consensusResult,
+          error: testPlanResult.error,
+        };
+      }
+
+      testPlanConsensusResult = testPlanResult.consensusResult;
+
+      // Document and persist test plan
+      const qaDocPath = await documentQaTestPlan(
+        projectDir, milestone, task, testPlanResult.testPlanText, testPlanResult.consensusResult,
+      );
+
+      state = await updateTaskInState(projectDir, task.id, {
+        qaTestPlanText: testPlanResult.testPlanText,
+        qaTestPlanParsed: testPlanResult.testPlanParsed ?? undefined,
+        qaTestPlanScore: testPlanResult.consensusResult.finalScore,
+        qaTestPlanIterations: testPlanResult.consensusResult.totalIterations,
+        qaTestPlanApproved: testPlanResult.consensusResult.approved,
+        qaTestPlanDoc: qaDocPath,
+      });
+
+      if (!testPlanResult.consensusResult.approved) {
+        onProgress?.('test-planning', `Test plan consensus not reached: ${testPlanResult.consensusResult.finalScore}%`);
+        state = await updateTaskInState(projectDir, task.id, {
+          status: 'failed',
+          error: `Test plan consensus not reached: ${testPlanResult.consensusResult.finalScore}%`,
+        });
+        return {
+          success: false,
+          task: { ...task, status: 'failed' },
+          consensusResult,
+          testPlanConsensusResult,
+          error: `Test plan not approved. Score: ${testPlanResult.consensusResult.finalScore}%`,
+        };
+      }
+
+      onProgress?.('test-planning', `Test plan approved with ${testPlanResult.consensusResult.finalScore}% consensus`);
+    } else if (qaActive && hasApprovedTestPlan) {
+      onProgress?.('test-planning', `Using existing approved test plan for: ${task.name} (Score: ${task.qaTestPlanScore}%)`);
+    }
+
+    // ============================================
+    // PHASE 5: Implement the Task (skip if already complete)
     // ============================================
     if (hasCompletedImplementation) {
       onProgress?.('task-implement', `Implementation already complete for: ${task.name}, skipping to tests...`);
     } else {
       onProgress?.('task-implement', `Implementing task: ${task.name}`);
 
+      // When QA is active, provide both approved plans as context
+      const implementationContext = (qaActive && task.qaTestPlanText)
+        ? `${consensusResult.bestPlan}\n\n## Approved Test Plan\n${task.qaTestPlanText}`
+        : consensusResult.bestPlan;
+
       const implementResult = await executeTaskCode(
         task,
-        consensusResult.bestPlan,  // Use the approved plan as context
+        implementationContext,
         projectDir,
         (msg) => onProgress?.('task-implement', msg)
       );
@@ -738,8 +819,148 @@ Phase: Test failure fix (attempt ${retries}/${maxRetries})
           task: { ...task, status: 'failed', testsPassed: false },
           consensusResult,
           testResult,
+          testPlanConsensusResult,
           error: `Tests failed: ${getTestSummary(testResult)}`,
         };
+      }
+
+      // ============================================
+      // PHASE 7: Tester reviews test results (only if QA enabled)
+      // ============================================
+      if (qaActive && task.qaTestPlanText && testResult) {
+        onProgress?.('test-review', `Tester is reviewing test results for: ${task.name}`);
+
+        const review = await runTestReviewPhase(
+          task, task.qaTestPlanText, testResult, state, onProgress,
+        );
+
+        // Document the review
+        const reviewDocPath = await documentTestReview(projectDir, milestone, task, review);
+
+        state = await updateTaskInState(projectDir, task.id, {
+          qaVerdict: review.verdict,
+          qaReviewNotes: review.summary,
+          qaReviewDoc: reviewDocPath,
+        });
+
+        if (review.verdict === 'FAIL') {
+          onProgress?.('test-review', `Tester verdict: FAIL - ${review.summary}`);
+
+          // Tester creates a fix plan -> consensus -> coder implements -> re-review loop
+          const fixPlanText = await createTesterFixPlan(
+            task, task.qaTestPlanText, testResult, review, state, onProgress,
+          );
+
+          // Get consensus on the fix plan
+          const fixContext = `Project: ${state.name}\nLanguage: ${state.language}\nMilestone: ${milestone.name}\nTask: ${task.name}\nPhase: QA Fix Plan`;
+          const useOptimized = consensusConfig?.useOptimizedConsensus !== false;
+          let fixConsensus: ConsensusProcessResult;
+
+          if (useOptimized) {
+            fixConsensus = await runOptimizedConsensusProcess(
+              fixPlanText, fixContext,
+              {
+                projectDir, config: consensusConfig,
+                milestoneId: milestone.id, milestoneName: milestone.name,
+                taskId: task.id, taskName: `${task.name} - QA Fix`,
+                parallelReviews: true, isFullstack: isWorkspace(state.language),
+                onIteration: (iteration, result) => {
+                  onProgress?.('test-review', `QA fix consensus iteration ${iteration}: ${result.score}%`);
+                },
+                onProgress,
+              },
+            ) as ConsensusProcessResult;
+          } else {
+            fixConsensus = await iterateUntilConsensus(
+              fixPlanText, fixContext,
+              {
+                projectDir, config: consensusConfig,
+                isFullstack: isWorkspace(state.language), language: state.language,
+                onIteration: (iteration, result) => {
+                  onProgress?.('test-review', `QA fix consensus iteration ${iteration}: ${result.score}%`);
+                },
+                onProgress,
+              },
+            ) as ConsensusProcessResult;
+          }
+
+          if (!fixConsensus.approved) {
+            state = await updateTaskInState(projectDir, task.id, {
+              status: 'failed',
+              error: `QA fix plan not approved (${fixConsensus.finalScore}%)`,
+            });
+            return {
+              success: false,
+              task: { ...task, status: 'failed' },
+              consensusResult,
+              testResult,
+              testPlanConsensusResult,
+              testRunReview: review,
+              error: `QA fix plan not approved. Score: ${fixConsensus.finalScore}%`,
+            };
+          }
+
+          // Implement the fix
+          onProgress?.('test-review', 'Implementing QA-approved fix...');
+          const fixResult = await handleTestFailure(
+            task, testResult, fixConsensus.bestPlan, projectDir,
+            (msg) => onProgress?.('test-review', msg),
+          );
+
+          if (!fixResult.success) {
+            state = await updateTaskInState(projectDir, task.id, {
+              status: 'failed',
+              error: `QA fix implementation failed: ${fixResult.error}`,
+            });
+            return {
+              success: false,
+              task: { ...task, status: 'failed' },
+              consensusResult,
+              testResult,
+              testPlanConsensusResult,
+              testRunReview: review,
+              error: `QA fix failed: ${fixResult.error}`,
+            };
+          }
+
+          // Re-run tests after fix
+          onProgress?.('test-review', 'Re-running tests after QA fix...');
+          const reTestResult = await runTests(projectDir, state.language);
+
+          // Tester re-reviews
+          const reReview = await runTestReviewPhase(
+            task, task.qaTestPlanText!, reTestResult, state, onProgress,
+          );
+
+          const reReviewDocPath = await documentTestReview(projectDir, milestone, task, reReview);
+          state = await updateTaskInState(projectDir, task.id, {
+            qaVerdict: reReview.verdict,
+            qaReviewNotes: reReview.summary,
+            qaReviewDoc: reReviewDocPath,
+          });
+
+          if (reReview.verdict === 'FAIL') {
+            state = await updateTaskInState(projectDir, task.id, {
+              status: 'failed',
+              testsPassed: false,
+              error: `QA re-review: FAIL - ${reReview.summary}`,
+            });
+            return {
+              success: false,
+              task: { ...task, status: 'failed', testsPassed: false },
+              consensusResult,
+              testResult: reTestResult,
+              testPlanConsensusResult,
+              testRunReview: reReview,
+              error: `QA verdict: FAIL after fix attempt`,
+            };
+          }
+
+          // PASS or PASS_WITH_NOTES after fix
+          onProgress?.('test-review', `Tester re-review verdict: ${reReview.verdict}`);
+        } else {
+          onProgress?.('test-review', `Tester verdict: ${review.verdict}`);
+        }
       }
 
       // Mark task as complete
@@ -753,6 +974,7 @@ Phase: Test failure fix (attempt ${retries}/${maxRetries})
         task: { ...task, status: 'complete', testsPassed: true },
         consensusResult,
         testResult,
+        testPlanConsensusResult,
       };
     }
 

@@ -48,6 +48,7 @@ export * from './project-structure.js';
 export * from './separation-guard.js';
 export * from './seo-tests.js';
 export * from './task-workflow.js';
+export * from './tester.js';
 export * from './milestone-workflow.js';
 export * from './plan-storage.js';
 export * from './workspace-manager.js';

@@ -865,10 +865,10 @@ ${task.name}
 ## Description
 ${task.description || task.name}
 
-${task.testPlan ? `## Test Requirements\n${task.testPlan}\n` : ''}
+${task.qaTestPlanText ? `## QA Test Plan\nImplement tests according to this approved test plan:\n${task.qaTestPlanText}\n` : ''}
 
 Please implement this task completely. After implementing:
-1. Create appropriate tests if needed
+1. Implement tests as specified in the QA Test Plan above
 2. Ensure code follows best practices
 3. Document any complex logic
 `.trim();

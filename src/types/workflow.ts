@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { OutputLanguageSchema } from './project.js';
 import type { OutputLanguage, OpenAIModel } from './project.js';
 import type { ConsensusIteration } from './consensus.js';
+import type { TestPlanOutput } from './tester.js';
+import { TestPlanOutputSchema, TestVerdictSchema } from './tester.js';
 
 /**
  * Workflow phases
@@ -68,6 +70,17 @@ export interface Task {
 
   // App target (which app this task affects)
   appTarget?: 'frontend' | 'backend' | 'unified';
+
+  // Tester (QA) tracking
+  qaTestPlanText?: string;           // Approved test plan (markdown, for humans)
+  qaTestPlanParsed?: TestPlanOutput; // Parsed structured plan (for machine flow)
+  qaTestPlanScore?: number;          // Consensus score (0-100)
+  qaTestPlanIterations?: number;     // Iterations to reach consensus
+  qaTestPlanApproved?: boolean;      // Whether consensus was reached
+  qaTestPlanDoc?: string;            // Path to docs/qa/test-plans/...
+  qaVerdict?: 'PASS' | 'PASS_WITH_NOTES' | 'FAIL';
+  qaReviewNotes?: string;            // Tester's review notes
+  qaReviewDoc?: string;              // Path to docs/qa/test-runs/...
 }
 
 /**
@@ -107,6 +120,16 @@ export const TaskSchema = z.object({
   backendConsensus: AppConsensusTrackingSchema.optional(),
   unifiedConsensus: AppConsensusTrackingSchema.optional(),
   appTarget: z.enum(['frontend', 'backend', 'unified']).optional(),
+  // Tester (QA) tracking
+  qaTestPlanText: z.string().optional(),
+  qaTestPlanParsed: TestPlanOutputSchema.optional(),
+  qaTestPlanScore: z.number().optional(),
+  qaTestPlanIterations: z.number().optional(),
+  qaTestPlanApproved: z.boolean().optional(),
+  qaTestPlanDoc: z.string().optional(),
+  qaVerdict: TestVerdictSchema.optional(),
+  qaReviewNotes: z.string().optional(),
+  qaReviewDoc: z.string().optional(),
 });
 
 /**
@@ -205,6 +228,8 @@ export interface ProjectState {
   strategyError?: string;
   /** Absolute paths to discovered source documentation files */
   sourceDocPaths?: string[];
+  /** Whether QA Tester skill is active (default: true for new projects, undefined/false for existing) */
+  qaEnabled?: boolean;
 }
 
 /**
@@ -250,6 +275,7 @@ export const ProjectStateSchema = z.object({
   websiteStrategy: z.string().optional(),
   strategyError: z.string().optional(),
   sourceDocPaths: z.array(z.string()).optional(),
+  qaEnabled: z.boolean().optional(),
 });
 
 /**
