@@ -182,6 +182,25 @@ ${scan.dockerComposeContent}
 \`\`\``);
   }
 
+  // Framework-specific checks
+  const frameworks = scan.components.map((c) => c.framework).filter(Boolean);
+  if (frameworks.some((f) => f === 'next')) {
+    sections.push(`## Next.js-Specific Checks (IMPORTANT)
+- Check for hydration mismatches: event handlers (onClick, onSubmit, onChange) in Server Components (files WITHOUT 'use client' directive) cause hydration errors
+- Check for \`new Date()\`, \`Date.now()\`, \`Math.random()\` in Server Components — these produce different values on server vs client
+- Check for \`typeof window\`, \`localStorage\`, \`navigator\` usage in render path of Server Components
+- Check for invalid HTML nesting: \`<p>\` inside \`<p>\`, \`<div>\` inside \`<p>\`, block elements inside inline elements
+- Verify that components with hooks (useState, useEffect, useRef) have 'use client' directive
+- Check for proper 'use client' boundary — interactive components (forms, buttons with handlers) must be Client Components`);
+  }
+  if (frameworks.some((f) => f === 'react' || f === 'vue' || f === 'svelte')) {
+    sections.push(`## Frontend Framework Checks
+- Check for missing key props on list items
+- Verify error boundaries exist for critical routes
+- Check for potential memory leaks (event listeners not cleaned up)
+- Verify environment variables used at runtime are prefixed correctly (VITE_, NEXT_PUBLIC_, REACT_APP_)`);
+  }
+
   // Depth-specific instructions
   if (depth >= 2) {
     sections.push(`## Depth-2 Checks
