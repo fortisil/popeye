@@ -14,7 +14,6 @@ import {
   generatePricingTeaserSection,
   generateFaqSection,
   buildFaqItemsDeclaration,
-  generateFaqItemComponent,
   buildFaqSchema,
   type SectionRenderInfo,
 } from './website-sections.js';
@@ -167,10 +166,7 @@ export function generateWebsiteLandingPageWithInfo(
   if (stats.jsx) {
     iconSet.add('CheckCircle');
   }
-  // FAQ
-  if (faq.jsx) {
-    iconSet.add('ChevronDown');
-  }
+  // FAQ — ChevronDown is now in FaqSection.tsx client component
   // Always useful
   iconSet.add('ArrowRight');
 
@@ -182,7 +178,6 @@ export function generateWebsiteLandingPageWithInfo(
 
   // FAQ data declarations
   const faqItemsDecl = buildFaqItemsDeclaration(strategy);
-  const faqItemComponent = faq.needsClientDirective ? generateFaqItemComponent() : '';
   const faqSchemaDecl = buildFaqSchema(strategy);
 
   // Build icon mapping for features
@@ -190,12 +185,13 @@ export function generateWebsiteLandingPageWithInfo(
     ? `const ICON_MAP: Record<string, React.ElementType> = {\n${Array.from(new Set(features.map(f => mapFeatureIcon(f.title)))).map(icon => `  ${icon},`).join('\n')}\n};\n`
     : '';
 
-  const code = `${faq.needsClientDirective ? "'use client';\n\nimport { useState } from 'react';\n" : ''}import type { Metadata } from 'next';
+  const code = `import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ${iconImports} } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import JsonLd from '@/components/JsonLd';
+${faq.needsClientDirective ? "import FaqSection from '@/components/FaqSection';" : ''}
 
 export const metadata: Metadata = {
   title: '${escapeJsx(metaTitle)}',
@@ -218,7 +214,6 @@ const PRODUCT_SCHEMA = {
 };
 
 ${faqSchemaDecl ? faqSchemaDecl + '\n' : ''}${faqItemsDecl ? '\n' + faqItemsDecl : ''}${iconComponentMap ? '\n' + iconComponentMap : ''}${features ? `\nconst features = [\n${featuresBlock}\n];\n` : ''}
-${faqItemComponent ? '\n' + faqItemComponent + '\n' : ''}
 export default function HomePage() {
   return (
     <>

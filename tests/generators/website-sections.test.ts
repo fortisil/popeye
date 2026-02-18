@@ -15,6 +15,7 @@ import {
   generateFaqSection,
   buildFaqItemsDeclaration,
   generateFaqItemComponent,
+  generateFaqSectionComponent,
   generatePricingTeaserSection,
 } from '../../src/generators/templates/website-sections.js';
 import type { WebsiteStrategyDocument } from '../../src/types/website-strategy.js';
@@ -188,9 +189,9 @@ describe('generateSocialProofSection', () => {
 describe('generateFaqSection', () => {
   it('renders FAQ from objections', () => {
     const { jsx, info, needsClientDirective } = generateFaqSection(makeStrategy());
-    // FAQ section JSX references faqItems via runtime mapping
-    expect(jsx).toContain('FaqItem');
-    expect(jsx).toContain('faqItems.map');
+    // FAQ section uses FaqSection component (separate client component)
+    expect(jsx).toContain('FaqSection');
+    expect(jsx).toContain('faqItems');
     expect(info.dataSource).toBe('strategy');
     expect(needsClientDirective).toBe(true);
   });
@@ -205,6 +206,16 @@ describe('generateFaqSection', () => {
     const component = generateFaqItemComponent();
     expect(component).toContain('aria-expanded');
     expect(component).toContain('onClick');
+  });
+
+  it('generates standalone FaqSection client component', () => {
+    const component = generateFaqSectionComponent();
+    expect(component).toContain("'use client'");
+    expect(component).toContain('useState');
+    expect(component).toContain('FaqSection');
+    expect(component).toContain('FaqItem');
+    expect(component).toContain('aria-expanded');
+    expect(component).toContain('ChevronDown');
   });
 
   it('skips when no objections', () => {

@@ -134,6 +134,14 @@ export function getComponentPlaybook(language: OutputLanguage): string {
 - Verify SEO meta tags with custom assertions (title, description, OG tags)
 - Test responsive layouts with viewport size assertions
 - Lighthouse CI for performance regression testing
+
+### Hydration Error Prevention (CRITICAL for Next.js)
+- Verify page.tsx files are Server Components (NO 'use client') — pages should not hydrate
+- Interactive sections (FAQ accordions, forms, modals) must be in separate 'use client' component files
+- Check that components with event handlers (onClick, onSubmit) or hooks (useState) have 'use client'
+- Check that <script> tags with dangerouslySetInnerHTML use suppressHydrationWarning
+- Verify no new Date(), Math.random(), or window/localStorage access in Server Component render paths
+- Run \`npm run build\` to catch hydration warnings at build time
 `.trim();
 
   if (language === 'python') return pythonPlaybook;

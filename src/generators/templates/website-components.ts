@@ -211,7 +211,9 @@ export function generateWebsiteFooter(
     })
     .join(',\n');
 
-  return `import Link from 'next/link';
+  return `'use client';
+
+import Link from 'next/link';
 
 const FOOTER_SECTIONS = [
 ${sectionsStr}

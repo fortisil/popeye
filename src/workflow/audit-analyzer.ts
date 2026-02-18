@@ -185,13 +185,25 @@ ${scan.dockerComposeContent}
   // Framework-specific checks
   const frameworks = scan.components.map((c) => c.framework).filter(Boolean);
   if (frameworks.some((f) => f === 'next')) {
-    sections.push(`## Next.js-Specific Checks (IMPORTANT)
-- Check for hydration mismatches: event handlers (onClick, onSubmit, onChange) in Server Components (files WITHOUT 'use client' directive) cause hydration errors
+    sections.push(`## Next.js-Specific Checks (IMPORTANT — Hydration Errors)
+
+### Server vs Client Component Architecture
+- Pages (page.tsx) should be Server Components by default — do NOT add 'use client' to pages
+- Only extract interactive parts (forms, accordions, modals, toggles) into separate Client Component files
+- If a page has 'use client' ONLY because of one interactive section (e.g. FAQ accordion), flag as major issue: extract the interactive part into its own 'use client' component file and keep the page as a Server Component
+- Server Components never hydrate, so they cannot have hydration mismatches
+
+### Hydration Mismatch Detection
+- Check for event handlers (onClick, onSubmit, onChange) in Server Components (files WITHOUT 'use client' directive) — these cause hydration errors
 - Check for \`new Date()\`, \`Date.now()\`, \`Math.random()\` in Server Components — these produce different values on server vs client
 - Check for \`typeof window\`, \`localStorage\`, \`navigator\` usage in render path of Server Components
+- Check for \`<script>\` tags with dangerouslySetInnerHTML in Client Components — add suppressHydrationWarning or move to Server Component
 - Check for invalid HTML nesting: \`<p>\` inside \`<p>\`, \`<div>\` inside \`<p>\`, block elements inside inline elements
+
+### Component Directive Verification
 - Verify that components with hooks (useState, useEffect, useRef) have 'use client' directive
-- Check for proper 'use client' boundary — interactive components (forms, buttons with handlers) must be Client Components`);
+- Components with form handlers (onSubmit) or interactive elements must be Client Components
+- Components rendering \`new Date().getFullYear()\` in JSX should be Client Components OR use suppressHydrationWarning`);
   }
   if (frameworks.some((f) => f === 'react' || f === 'vue' || f === 'svelte')) {
     sections.push(`## Frontend Framework Checks

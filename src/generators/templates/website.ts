@@ -35,5 +35,6 @@ export {
   generateSocialProofSection,
   generatePricingTeaserSection,
   generateFaqSection,
+  generateFaqSectionComponent,
 } from './website-sections.js';
 export type { SectionRenderInfo } from './website-sections.js';

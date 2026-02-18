@@ -121,7 +121,10 @@ describe('generateWebsiteLandingPageWithInfo', () => {
     const result = generateWebsiteLandingPageWithInfo('gateco', makeContext());
     expect(result.code).toContain('Is it secure?');
     expect(result.code).toContain('Does it scale?');
-    expect(result.code).toContain('FaqItem');
+    // Uses FaqSection component (separate client component) instead of inline FaqItem
+    expect(result.code).toContain('FaqSection');
+    // Page should NOT have 'use client' — FAQ is isolated in FaqSection component
+    expect(result.code).not.toContain("'use client'");
   });
 
   it('renders pricing teaser from context pricing', () => {

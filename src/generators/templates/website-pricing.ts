@@ -107,9 +107,10 @@ ${featuresStr}
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import FaqSection from '@/components/FaqSection';
 
 const tiers = [
 ${tiersBlock}
@@ -118,27 +119,6 @@ ${tiersBlock}
 const pricingFaq = [
 ${faqStr}
 ];
-
-function FaqItem({ question, answer }: { question: string; answer: string }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="py-4">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between text-left"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-      >
-        <span className="text-base font-medium text-foreground">{question}</span>
-        <ChevronDown className={\`h-5 w-5 text-muted-foreground transition-transform \${open ? 'rotate-180' : ''}\`} />
-      </button>
-      {open && (
-        <p className="mt-3 text-muted-foreground">{answer}</p>
-      )}
-    </div>
-  );
-}
 
 export default function PricingPage() {
   const [annual, setAnnual] = useState(false);
@@ -250,11 +230,7 @@ ${comparisonBlock}
             <h2 className="text-2xl font-bold text-foreground text-center">
               Pricing FAQ
             </h2>
-            <div className="mt-8 divide-y divide-border">
-              {pricingFaq.map((item, i) => (
-                <FaqItem key={i} question={item.question} answer={item.answer} />
-              ))}
-            </div>
+            <FaqSection items={pricingFaq} />
           </div>
 
           {/* Enterprise CTA */}

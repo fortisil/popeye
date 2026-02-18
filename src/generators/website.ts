@@ -47,6 +47,7 @@ import {
   generateContactForm,
   generateLeadCaptureEnvExample,
 } from './templates/website-conversion.js';
+import { generateFaqSectionComponent } from './templates/website-sections.js';
 import type { WebsiteContentContext } from './website-context.js';
 import { validateWebsiteContextOrThrow } from './website-context.js';
 import { scanGeneratedContent } from './website-content-scanner.js';
@@ -266,6 +267,10 @@ export async function generateWebsiteProject(
       {
         path: path.join(projectDir, 'src', 'components', 'JsonLd.tsx'),
         content: generateJsonLdComponent(),
+      },
+      {
+        path: path.join(projectDir, 'src', 'components', 'FaqSection.tsx'),
+        content: generateFaqSectionComponent(),
       },
       {
         path: path.join(projectDir, 'src', 'components', 'ContactForm.tsx'),
