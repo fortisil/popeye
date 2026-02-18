@@ -1,6 +1,6 @@
 {
   "name": "popeye-cli",
-  "version": "1.9.4",
+  "version": "1.9.5",
   "description": "Fully autonomous code generation tool powered by Claude CLI and OpenAI consensus",
   "main": "./dist/index.js",
   "bin": {

@@ -182,6 +182,7 @@ export function generateAllDockerCompose(projectName: string): string {
     build:
       context: apps/frontend
       dockerfile: Dockerfile
+      target: production
     ports:
       - "3000:80"
     depends_on:
