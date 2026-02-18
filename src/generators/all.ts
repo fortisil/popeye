@@ -109,11 +109,7 @@ export function generateAllWorkspaceJson(projectName: string): string {
           dev: 'npm run dev',
           typecheck: 'npm run typecheck',
         },
-        docker: {
-          dockerfile: 'apps/website/Dockerfile',
-          imageName: `${projectName}-website`,
-          context: 'apps/website',
-        },
+        // No docker — website runs outside Docker (npm run dev / npm start)
         dependsOn: ['packages/design-tokens'],
         contextRoots: ['apps/website/src'],
       },
@@ -176,10 +172,12 @@ export function generateRootPackageJson(projectName: string): string {
 /**
  * Generate docker-compose.yml for "all" projects
  */
+/**
+ * Generate docker-compose.yml for "all" projects (FE + BE only).
+ * Website runs via `npm run dev` / `npm run build && npm start` outside Docker.
+ */
 export function generateAllDockerCompose(projectName: string): string {
-  return `version: '3.8'
-
-services:
+  return `services:
   frontend:
     build:
       context: apps/frontend
@@ -202,21 +200,8 @@ services:
     environment:
       - DEBUG=false
       - FRONTEND_URL=http://frontend:80
-      - WEBSITE_URL=http://website:3000
     volumes:
       - backend-data:/app/data
-    networks:
-      - ${projectName}-network
-
-  website:
-    build:
-      context: apps/website
-      dockerfile: Dockerfile
-    ports:
-      - "3001:3000"
-    environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_APP_URL=http://localhost:3000
     networks:
       - ${projectName}-network
 
@@ -434,7 +419,7 @@ export async function generateAllProject(
     const websiteResult = await generateWebsiteProject(spec, projectDir, {
       baseDir: path.join(projectDir, 'apps', 'website'),
       workspaceMode: true,
-      skipDocker: false, // Website needs its own Dockerfile
+      skipDocker: true, // Website runs outside Docker (npm run dev / npm start)
       skipReadme: false,
       contentContext: contentContext,
     });

@@ -299,12 +299,13 @@ describe('generateDockerComposeWithDb', () => {
 });
 
 describe('generateAllDockerComposeWithDb', () => {
-  it('should include postgres, frontend, backend, and website services', () => {
+  it('should include postgres, frontend, and backend services (no website)', () => {
     const result = generateAllDockerComposeWithDb(TEST_PROJECT);
     expect(result).toContain('postgres:');
     expect(result).toContain('frontend:');
     expect(result).toContain('backend:');
-    expect(result).toContain('website:');
+    // Website runs outside Docker (npm run dev / npm start)
+    expect(result).not.toContain('website:');
   });
 
   it('should have backend depends_on postgres with healthy condition', () => {

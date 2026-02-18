@@ -122,14 +122,13 @@ volumes:
 }
 
 /**
- * Generate full docker-compose.yml for "all" projects (FE + BE + Website + Postgres)
+ * Generate full docker-compose.yml for "all" projects (FE + BE + Postgres)
+ * Website runs via `npm run dev` / `npm run build && npm start` outside Docker.
  */
 export function generateAllDockerComposeWithDb(projectName: string): string {
   const dbName = projectName.replace(/-/g, '_') + '_db';
 
-  return `version: '3.8'
-
-services:
+  return `services:
   frontend:
     build:
       context: apps/frontend
@@ -152,25 +151,12 @@ services:
     environment:
       - DEBUG=false
       - FRONTEND_URL=http://frontend:80
-      - WEBSITE_URL=http://website:3000
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/${dbName}
     volumes:
       - backend-data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
-    networks:
-      - ${projectName}-network
-
-  website:
-    build:
-      context: apps/website
-      dockerfile: Dockerfile
-    ports:
-      - "3001:3000"
-    environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_APP_URL=http://localhost:3000
     networks:
       - ${projectName}-network
 

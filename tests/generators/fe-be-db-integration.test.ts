@@ -328,11 +328,12 @@ describe('Docker Compose: Fullstack service wiring', () => {
 describe('Docker Compose: All project service wiring', () => {
   const compose = generateAllDockerComposeWithDb(TEST_PROJECT);
 
-  it('should include frontend, backend, website, and postgres services', () => {
+  it('should include frontend, backend, and postgres services (no website)', () => {
     expect(compose).toContain('frontend:');
     expect(compose).toContain('backend:');
-    expect(compose).toContain('website:');
     expect(compose).toContain('postgres:');
+    // Website runs outside Docker (npm run dev / npm start)
+    expect(compose).not.toContain('website:');
   });
 
   it('backend should depend on postgres with health condition', () => {
@@ -344,7 +345,7 @@ describe('Docker Compose: All project service wiring', () => {
     expect(compose).toContain(networkName);
     // Count network references - should appear in services + network definition
     const networkCount = (compose.match(new RegExp(networkName, 'g')) || []).length;
-    expect(networkCount).toBeGreaterThanOrEqual(5); // 4 services + 1 definition
+    expect(networkCount).toBeGreaterThanOrEqual(4); // 3 services + 1 definition
   });
 
   it('frontend API URL should point to backend service', () => {
