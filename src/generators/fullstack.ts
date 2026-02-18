@@ -115,16 +115,16 @@ export async function generateFullstackProject(
       // Docker
       {
         path: path.join(projectDir, 'infra', 'docker', 'docker-compose.yml'),
-        content: generateDockerComposeWithDb(projectName),
+        content: generateDockerComposeWithDb(projectName, packageName),
       },
       {
         path: path.join(projectDir, 'docker-compose.yml'),
-        content: generateDockerComposeWithDb(projectName),
+        content: generateDockerComposeWithDb(projectName, packageName),
       },
       // Documentation
       {
         path: path.join(projectDir, 'README.md'),
-        content: generateRootReadme(projectName, spec.idea),
+        content: generateRootReadme(projectName, spec.idea, packageName),
       },
       {
         path: path.join(projectDir, '.gitignore'),
@@ -277,7 +277,7 @@ export async function generateFullstackProject(
       },
       {
         path: path.join(backendDir, 'tests', 'conftest.py'),
-        content: generateConftest(),
+        content: generateConftest(packageName),
       },
       {
         path: path.join(backendDir, 'tests', 'test_main.py'),
@@ -291,7 +291,7 @@ export async function generateFullstackProject(
       // Documentation
       {
         path: path.join(backendDir, 'README.md'),
-        content: generateBackendReadme(projectName),
+        content: generateBackendReadme(projectName, packageName),
       },
       // Environment
       {
@@ -358,7 +358,7 @@ license = {text = "MIT"}
 dependencies = [
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
-    "pydantic>=2.5.0",
+    "pydantic[email]>=2.5.0",
     "pydantic-settings>=2.1.0",
 ]
 
@@ -390,7 +390,7 @@ select = ["E", "F", "I", "N", "W"]
 /**
  * Generate conftest.py for backend tests
  */
-function generateConftest(): string {
+function generateConftest(packageName: string): string {
   return `"""
 Test configuration and fixtures.
 """
@@ -409,7 +409,7 @@ def anyio_backend():
 @pytest.fixture
 async def client():
     """Create async test client."""
-    from src.backend.main import app
+    from src.${packageName}.main import app
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

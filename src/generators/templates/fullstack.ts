@@ -11,7 +11,8 @@ import type { WorkspaceConfig } from '../../types/project.js';
  * @param projectName - The project name
  * @returns Workspace configuration object
  */
-export function generateWorkspaceConfig(projectName: string): WorkspaceConfig {
+export function generateWorkspaceConfig(projectName: string, packageName?: string): WorkspaceConfig {
+  const pyPkg = packageName || projectName.replace(/-/g, '_');
   return {
     version: '1.0',
     apps: {
@@ -41,14 +42,14 @@ export function generateWorkspaceConfig(projectName: string): WorkspaceConfig {
           test: 'python -m pytest tests/ -v',
           lint: 'ruff check src/ tests/',
           build: 'pip install -e .',
-          dev: 'uvicorn src.backend.main:app --reload --port 8000',
+          dev: `uvicorn src.${pyPkg}.main:app --reload --port 8000`,
         },
         docker: {
           dockerfile: 'apps/backend/Dockerfile',
           imageName: `${projectName}-backend`,
           context: 'apps/backend',
         },
-        contextRoots: ['src/backend', 'tests'],
+        contextRoots: [`src/${pyPkg}`, 'tests'],
       },
     },
     commands: {
@@ -75,7 +76,8 @@ export function generateWorkspaceJson(projectName: string): string {
 /**
  * Generate root docker-compose.yml for fullstack project
  */
-export function generateRootDockerCompose(projectName: string): string {
+export function generateRootDockerCompose(projectName: string, packageName?: string): string {
+  const pyPkg = packageName || projectName.replace(/-/g, '_');
   return `version: "3.8"
 
 services:
@@ -127,7 +129,7 @@ services:
     volumes:
       - ./apps/backend/src:/app/src
       - ./apps/backend/tests:/app/tests
-    command: ["uvicorn", "src.backend.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "src.${pyPkg}.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
 
 volumes:
   backend-data:
@@ -137,7 +139,8 @@ volumes:
 /**
  * Generate root README.md for fullstack project
  */
-export function generateRootReadme(projectName: string, description?: string): string {
+export function generateRootReadme(projectName: string, description?: string, packageName?: string): string {
+  const pyPkg = packageName || projectName.replace(/-/g, '_');
   return `# ${projectName}
 
 ${description || 'A fullstack application with React frontend and FastAPI backend.'}
@@ -171,7 +174,7 @@ docker-compose up frontend-dev backend-dev
 # Terminal 1 - Backend
 cd apps/backend
 pip install -e .
-uvicorn src.backend.main:app --reload --port 8000
+uvicorn src.${pyPkg}.main:app --reload --port 8000
 
 # Terminal 2 - Frontend
 cd apps/frontend
@@ -426,7 +429,8 @@ npm run test:coverage # With coverage
 /**
  * Generate backend-specific README for fullstack project
  */
-export function generateBackendReadme(projectName: string): string {
+export function generateBackendReadme(projectName: string, packageName?: string): string {
+  const pyPkg = packageName || projectName.replace(/-/g, '_');
   return `# ${projectName} - Backend
 
 FastAPI backend application.
@@ -438,7 +442,7 @@ FastAPI backend application.
 pip install -e .
 
 # Run development server
-uvicorn src.backend.main:app --reload --port 8000
+uvicorn src.${pyPkg}.main:app --reload --port 8000
 \`\`\`
 
 ## Scripts (Makefile)
@@ -836,7 +840,7 @@ FROM node:20-slim as build
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 COPY . .
 RUN npm run build
@@ -856,7 +860,7 @@ FROM node:20-slim as development
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 COPY . .
 
@@ -1024,7 +1028,8 @@ if __name__ == "__main__":
 /**
  * Generate backend Dockerfile for FastAPI
  */
-export function generateBackendDockerfile(_projectName: string): string {
+export function generateBackendDockerfile(projectName: string): string {
+  const pyPkg = projectName.replace(/-/g, '_');
   return `# Python base image
 FROM python:3.11-slim
 
@@ -1053,7 +1058,7 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "src.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "${pyPkg}.main:app", "--host", "0.0.0.0", "--port", "8000"]
 `;
 }
 
@@ -1064,7 +1069,7 @@ export function generateFastAPIRequirements(): string {
   return `# FastAPI and dependencies
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
-pydantic>=2.5.0
+pydantic[email]>=2.5.0
 pydantic-settings>=2.1.0
 
 # Development

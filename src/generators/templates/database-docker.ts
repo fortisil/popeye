@@ -31,7 +31,8 @@ export function generatePostgresServiceYaml(projectName: string): string {
  * Preserves all 4 existing services (frontend, backend, frontend-dev, backend-dev)
  * and adds postgres service with proper depends_on
  */
-export function generateDockerComposeWithDb(projectName: string): string {
+export function generateDockerComposeWithDb(projectName: string, packageName?: string): string {
+  const pyPkg = packageName || projectName.replace(/-/g, '_');
   const dbName = projectName.replace(/-/g, '_') + '_db';
 
   return `version: "3.8"
@@ -110,7 +111,7 @@ services:
       - ./apps/backend/tests:/app/tests
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/${dbName}
-    command: ["uvicorn", "src.backend.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "src.${pyPkg}.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       postgres:
         condition: service_healthy

@@ -467,7 +467,7 @@ export async function generateAllProject(
         path: path.join(projectDir, '.popeye', 'workspace.json'),
         content: generateAllWorkspaceJson(projectName),
       },
-      // Docker compose (override to include website + postgres)
+      // Docker compose (FE + BE + postgres; website runs outside Docker)
       {
         path: path.join(projectDir, 'docker-compose.yml'),
         content: generateAllDockerComposeWithDb(projectName),
