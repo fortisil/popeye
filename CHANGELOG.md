@@ -2,6 +2,65 @@
 
 All notable changes to Popeye CLI are documented in this file.
 
+## [2.0.0] - 2026-02-20
+
+### Breaking Changes
+- **Full Autonomy Pipeline Engine** — Popeye now ships a complete 14-phase deterministic pipeline that replaces the ad-hoc plan-then-execute workflow with a gate-driven state machine. This is a fundamental architectural shift: every phase must produce typed artifacts, pass gate checks, and survive consensus review before the pipeline advances. The pipeline manages its own recovery, drift detection, and rewind logic without human intervention.
+- `PipelineState` is now the authoritative runtime state for autonomous execution (distinct from the existing `ProjectState` used by the interactive CLI).
+- New `src/pipeline/` module tree (33 source files) is a peer to the existing `src/workflow/` module.
+
+### Added — Pipeline Core (Autonomy Hardening v1.0)
+
+- **14-Phase State Machine** — `INTAKE` -> `CONSENSUS_MASTER_PLAN` -> `ARCHITECTURE` -> `CONSENSUS_ARCHITECTURE` -> `ROLE_PLANNING` -> `CONSENSUS_ROLE_PLANS` -> `IMPLEMENTATION` -> `QA_VALIDATION` -> `REVIEW` -> `AUDIT` -> `PRODUCTION_GATE` -> `DONE` (or `RECOVERY_LOOP` / `STUCK` on failure). Each phase has a dedicated handler in `src/pipeline/phases/`.
+- **Gate Engine** (`gate-engine.ts`) — Pure deterministic evaluator. Each phase has a `GateDefinition` specifying required artifacts, required checks, consensus thresholds, allowed transitions, and fail transition. No side effects; reads state only.
+- **Orchestrator** (`orchestrator.ts`) — Main loop that drives the pipeline from any phase to completion. Handles phase dispatch, gate evaluation, recovery routing, resume from saved state, and terminal state handling.
+- **Type-Safe Artifact System** (`artifact-manager.ts`, `type-defs/artifacts.ts`) — 18 artifact types (`master_plan`, `architecture`, `role_plan`, `consensus`, `repo_snapshot`, `rca_report`, `audit_report`, `qa_validation`, `review_decision`, `production_readiness`, `constitution`, `change_request`, `release_notes`, `journalist_update`, `dependency_graph`, `implementation_log`, `recovery_log`, `skill_definition`). Each artifact has id, type, phase, version, path, sha256, timestamp, immutability flag, content_type, and group_id.
+- **Consensus System** (`consensus/consensus-runner.ts`, `packets/consensus-packet-builder.ts`) — Multi-reviewer consensus with confidence-weighted scoring. `APPROVE` = 1.0, `CONDITIONAL` = 0.5, `REJECT` = 0.0, weighted by voter confidence. Any vote with `blocking_issues` forces `weighted_score` to 0. Three consensus phases (master plan, architecture, role plans) each produce `ConsensusPacket` artifacts.
+- **Skill Loader** (`skill-loader.ts`, `skills/defaults.ts`) — 16 pipeline roles (`DISPATCHER`, `FRONTEND_PROGRAMMER`, `BACKEND_PROGRAMMER`, `DATABASE_SPECIALIST`, `DEVOPS_ENGINEER`, `QA_ENGINEER`, `UX_DESIGNER`, `TECHNICAL_WRITER`, `REVIEWER`, `AUDITOR`, `JOURNALIST`, `SECURITY_ANALYST`, `PERFORMANCE_ENGINEER`, `INTEGRATION_SPECIALIST`, `ARCHITECT`, `PROJECT_MANAGER`). Each role has a system prompt, constraints, output contract, and required sections.
+- **Constitution System** (`constitution.ts`) — SHA-256 hash verification of `POPEYE_CONSTITUTION.md`. Created during INTAKE, verified before every gate evaluation. Hash mismatch blocks pipeline progression.
+- **Repo Snapshot & Drift Detection** (`repo-snapshot.ts`) — File/line counting, language detection, config file inventory, port scanning, test framework and build tool detection. Snapshot diffing for drift detection between approved plans and implementation.
+- **Check Runner** (`check-runner.ts`) — Deterministic command execution for `build`, `test`, `lint`, `typecheck`, `start`, and `env_check` gates. Captures exit code, stdout/stderr, duration.
+- **Command Resolver** (`command-resolver.ts`) — Auto-detects `build`, `test`, `lint`, `typecheck`, and `start` commands from `package.json` scripts, `Makefile`, and common patterns.
+- **Artifact Validators** (`artifact-validators.ts`) — Deterministic regex/structural checks before LLM review: `master_plan` (Goals, Milestones, Success Criteria sections, 200+ chars), `architecture` (Components, Data Flow, Tech Stack, file path references), `role_plan` (Tasks, Dependencies, Acceptance Criteria), `qa_validation` (Test Results, Coverage), `audit_report` (JSON with findings array, overall_status, system_risk_score).
+- **Change Request System** (`change-request.ts`) — Structured drift tracking: `scope` -> `CONSENSUS_MASTER_PLAN`, `architecture` -> `CONSENSUS_ARCHITECTURE`, `dependency` -> `CONSENSUS_ROLE_PLANS`, `config` -> `QA_VALIDATION`, `requirement` -> `CONSENSUS_MASTER_PLAN`. CRs include origin phase, requester, impact analysis (affected artifacts, phases, risk level).
+- **Role Execution Adapter** (`role-execution-adapter.ts`) — Bridges pipeline roles to execution. Builds role-specific system prompts from skill + role plan, defines allowed paths and forbidden patterns, injects context into `ClaudeExecuteOptions`.
+- **RCA & Recovery** (`packets/rca-packet-builder.ts`, `phases/recovery-loop.ts`) — Root Cause Analysis packets with `requires_phase_rewind_to` for targeted recovery. Recovery loop reads RCA artifacts from disk to determine rewind targets.
+- **Packet Builders** — `plan-packet-builder.ts` (PlanPacket with milestones, constraints, deliverables), `consensus-packet-builder.ts` (ConsensusPacket with votes, scores, conditions), `rca-packet-builder.ts` (RCAPacket with root cause, evidence, rewind target), `audit-report-builder.ts` (AuditReport with findings, risk score, status).
+- **Migration System** (`migration.ts`) — Version-aware pipeline state migration for forward compatibility.
+- **Pipeline Index** (`index.ts`) — Public API: `runPipeline()`, `resumePipeline()`, `createDefaultPipelineState()`, `createGateEngine()`, plus all type exports.
+
+### Added — Autonomy Hardening v1.1 (Gap Fixes)
+
+- **Deterministic CR Routing** — After REVIEW and AUDIT phases pass their gates, the orchestrator checks `pipeline.pendingChangeRequests` for proposed CRs. First proposed CR is marked `approved` and the pipeline transitions to its `target_phase` (a consensus phase). This is a real state machine transition, not advisory.
+- **Constitution Verification in Orchestrator** — `verifyConstitution(pipeline, projectDir)` is called before every `evaluateGate()`. Result is passed as `{ constitutionValid, constitutionReason }` options. Gate engine adds constitution failure as a blocker.
+- **Gate Result Merge** — `mergeGateResult()` preserves `score`/`consensusScore` stored by consensus phase handlers while updating `pass`/`blockers` from the gate engine. Prevents consensus scoring data loss on re-evaluation.
+- **RCA Rewind from Disk** — `getLatestRCA()` reads the latest `rca_report` JSON artifact from the filesystem and parses `requires_phase_rewind_to`. Recovery loop uses this to rewind to the correct phase instead of always returning to the failed phase.
+- `score?: number` on `GateResult` in `gate-engine.ts` (was present in type-defs but missing from the runtime interface).
+- `pendingChangeRequests` array on `PipelineState` for CR lifecycle tracking (`proposed` -> `approved` -> routing).
+
+### Added — Type System
+
+- **Split `types.ts` into `type-defs/` directory** (8 files) — `enums.ts` (PipelinePhase, PipelineRole), `artifacts.ts` (18 artifact types, ArtifactEntry, ArtifactRef, DependencyEdge), `packets.ts` (PlanPacket, ConsensusPacket, ReviewerVote, RCAPacket, ChangeRequest, Constraint), `audit.ts` (AuditFinding, AuditReport), `snapshot.ts` (RepoSnapshot, ConfigFileEntry, PortEntry, SnapshotDiff), `checks.ts` (GateCheckType, GateCheckResult, ResolvedCommands), `state.ts` (PipelineState, GateResult, GateDefinition, SkillDefinition, PhaseResult, PhaseContext), `index.ts` (barrel re-export). All existing `from '../pipeline/types.js'` imports work unchanged.
+
+### Added — Tests
+
+- **59 new test files** covering the entire pipeline module with **1210 total tests** (up from 828):
+  - `orchestrator.test.ts` (25 tests) — Happy path, recovery loop, resume, gate integration, v1.1 gap fixes (CR routing, constitution, merge, RCA rewind)
+  - `gate-engine.test.ts` — Gate definitions, evaluations, transitions, consensus thresholds
+  - `consensus-scoring.test.ts` — Weighted scoring, CONDITIONAL=0.5, blocking issues, confidence weights
+  - `constitution.test.ts` — Artifact creation, hash computation, tamper detection
+  - `artifact-validators.test.ts` — Each type: valid pass, missing sections, empty content, edge cases
+  - `change-request.test.ts` — CR building, routing per change type, impact analysis
+  - `role-execution-adapter.test.ts` — Role context, prompt injection, forbidden patterns
+  - `start-env-checks.test.ts` — Start check (alive/crash/timeout), env check (complete/missing/empty)
+  - `check-runner.test.ts`, `command-resolver.test.ts`, `consensus-runner.test.ts`, `repo-snapshot.test.ts`, `skill-loader.test.ts`, `artifact-manager.test.ts`, `migration.test.ts`, `types.test.ts`, `packets/builders.test.ts`
+
+### Changed
+- Orchestrator main loop now has 3 new behaviors between phase execution and transition: (1) constitution verification before gate eval, (2) gate result merging after gate eval, (3) CR routing check after REVIEW/AUDIT gate pass.
+- REVIEW phase creates CRs for config drift and scope drift, registers them in `pipeline.pendingChangeRequests`.
+- AUDIT phase creates CRs for blocking architectural and security findings, registers them in `pipeline.pendingChangeRequests`.
+- `src/workflow/index.ts` — Added pipeline exports for integration with existing workflow system.
+
 ## [1.6.0] - 2026-02-17
 
 ### Added

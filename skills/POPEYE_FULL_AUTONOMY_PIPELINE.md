@@ -1,6 +1,6 @@
 # Popeye Full Autonomy Pipeline Spec
-Version: 1.0
-Goal: 1 idea → 1 prompt → Popeye → production-ready system (PASS Production Gate)
+Version: 1.1 (Autonomy Hardening Gap Fixes)
+Goal: 1 idea -> 1 prompt -> Popeye -> production-ready system (PASS Production Gate)
 
 This spec defines the end-to-end autonomous workflow Popeye must execute, including:
 - Phase sequencing (no skipping)
@@ -89,6 +89,27 @@ Artifacts are never overwritten. New versions create new files.
 ### Allowed transitions
 - Each phase may only transition to the next if all required artifacts exist and the gate passes.
 - Any failure routes to RECOVERY_LOOP, except missing inputs which route back to the phase that needs them.
+
+### v1.1 Gate Behaviors (Autonomy Hardening)
+
+Between phase execution and transition, the orchestrator now applies three additional checks:
+
+1. **Constitution Verification**: Before every `evaluateGate()` call, verifies that `skills/POPEYE_CONSTITUTION.md` has not been modified since pipeline start (SHA-256 hash comparison). If the constitution is invalid, the gate is blocked.
+
+2. **Gate Result Merge**: After gate evaluation, preserves `score`/`consensusScore` values stored by consensus phase handlers while updating `pass`/`blockers` from the gate engine. Prevents overwriting of consensus scores.
+
+3. **Change Request (CR) Routing**: After REVIEW and AUDIT phases pass their gates, checks `pipeline.pendingChangeRequests` for any `proposed` CRs. If found, deterministically routes to the appropriate consensus phase (based on change type) rather than continuing normal progression. CR lifecycle: `proposed` -> `approved` (when routed) or `rejected`.
+
+### v1.1 Pipeline State Additions
+
+```
+pendingChangeRequests?: Array<{
+  cr_id: string;
+  change_type: 'scope' | 'architecture' | 'dependency' | 'config' | 'requirement';
+  target_phase: PipelinePhase;
+  status: 'proposed' | 'approved' | 'rejected';
+}>;
+```
 
 ---
 
@@ -321,14 +342,23 @@ Artifacts are never overwritten. New versions create new files.
   - evidence references
   - no shortcuts
   - integration wiring
+- Generate fresh repo snapshot and diff against baseline (role-plan-approval snapshot)
+- Detect implementation drift (config changes, significant line deltas)
 
 **Outputs**
-- Review decision doc → `/docs/consensus/review_<id>_<date>.md`
+- Review decision doc -> `/docs/consensus/review_<id>_<date>.md`
 - If rejected: structured blocking list
+- v1.1: Change Request artifacts for detected drift (stored as `change_request` artifacts)
+- v1.1: Pending CRs registered in `pipeline.pendingChangeRequests` for orchestrator routing
 
 **Gate conditions (PASS)**
 - Reviewer approves with evidence
 - No Constitution violations
+
+**v1.1 Post-Gate Behavior**
+- After REVIEW gate passes, orchestrator checks `pendingChangeRequests` for proposed CRs
+- If CRs exist, routes to the appropriate consensus phase (e.g., CONSENSUS_MASTER_PLAN for scope drift)
+- If no CRs, continues to AUDIT normally
 
 ---
 
@@ -339,7 +369,7 @@ Artifacts are never overwritten. New versions create new files.
 - Everything above + repo snapshot + logs
 
 **Actions (Auditor)**
-- Integration audit (FE↔BE, BE↔DB)
+- Integration audit (FE<->BE, BE<->DB)
 - Config/env audit
 - Tests/coverage audit
 - Migration audit
@@ -347,14 +377,23 @@ Artifacts are never overwritten. New versions create new files.
 - Deployment readiness audit
 
 **Outputs (required)**
-- Audit Report → `/docs/audit/audit_<id>_<date>.md`
-- Audit Report schema (optional json)
+- Audit Report -> `/docs/audit/audit_<id>_<date>.md`
+- Audit Report schema (JSON)
+- v1.1: Change Request artifacts for blocking architectural/security findings
+- v1.1: Pending CRs registered in `pipeline.pendingChangeRequests` for orchestrator routing
 
 **Gate conditions (PASS)**
 - No P0/P1 findings open
 - Deployment path exists
 - No hardcoded secrets
 - End-to-end wiring verified
+
+**v1.1 Post-Gate Behavior**
+- After AUDIT gate passes, orchestrator checks `pendingChangeRequests` for proposed CRs
+- Architectural findings (integration/schema blocking issues) create CRs targeting CONSENSUS_ARCHITECTURE
+- Security findings create CRs targeting CONSENSUS_MASTER_PLAN
+- If CRs exist, routes to the appropriate consensus phase before PRODUCTION_GATE
+- If no CRs, continues to PRODUCTION_GATE normally
 
 **If FAIL**
 - Enter RECOVERY_LOOP
@@ -389,7 +428,7 @@ Artifacts are never overwritten. New versions create new files.
 
 ---
 
-## 4) Recovery Loop (FAIL → Debugger → Plan → Fix → Retest)
+## 4) Recovery Loop (FAIL -> Debugger -> Plan -> Fix -> Retest)
 
 ### Phase 12 — RECOVERY_LOOP (conditional)
 **Purpose**: Self-heal deterministically using RCA, not guesswork.
@@ -406,6 +445,7 @@ Artifacts are never overwritten. New versions create new files.
    - ownership (which role must fix)
    - recommended corrective actions
    - prevention suggestion
+   - v1.1: `requires_phase_rewind_to` field specifying which phase to rewind to
 
 2) **Dispatcher generates Recovery Plan**
    - targeted tasks mapped to responsible role(s)
@@ -416,19 +456,23 @@ Artifacts are never overwritten. New versions create new files.
 
 4) **Implement fixes** (by responsible role)
 
-5) **Retest only the failed gate first**, then proceed forward:
-   - If failed at Audit → rerun Audit
-   - If failed at Production Gate → rerun Production checks
-   - If failed tests → rerun tests + QA validation
+5) **Post-recovery routing** (v1.1 — RCA-driven rewind):
+   - Orchestrator reads latest RCA JSON artifact from disk
+   - If RCA specifies `requires_phase_rewind_to`, pipeline rewinds to that phase
+   - Otherwise, retests the originally failed phase, then proceeds forward:
+     - If failed at Audit -> rerun Audit
+     - If failed at Production Gate -> rerun Production checks
+     - If failed tests -> rerun tests + QA validation
+   - If no failed phase is tracked, defaults to QA_VALIDATION
 
 **Outputs (required)**
-- RCA report → `/docs/incidents/rca_<id>_<date>.md`
+- RCA report -> `/docs/incidents/rca_<id>_<date>.md` (both markdown and JSON, JSON includes `requires_phase_rewind_to`)
 - Recovery plan packet + consensus packet
 - Updated artifacts if scope/contracts changed
 
 **Stop conditions**
 - Max recovery iterations (default: 5)
-- If exceeded → STUCK state with “Stuck Report”
+- If exceeded -> STUCK state with “Stuck Report”
 
 ---
 
@@ -478,6 +522,15 @@ If recovery iterations exceed max, Popeye must stop and output:
   - Journalist record
 - Every plan claim must be evidenced against repo snapshot
 - Production readiness is binary, not “looks good”
+
+### v1.1 Additions
+
+- Constitution integrity is verified at every gate (SHA-256 hash comparison). A modified constitution blocks all gate progression until resolved.
+- Consensus scores from phase handlers are never overwritten by gate engine evaluation (gate result merge rule).
+- REVIEW and AUDIT phases must register detected issues as Change Requests in `pipeline.pendingChangeRequests`.
+- CRs are routed deterministically by the orchestrator (not advisory). The routing is a deterministic transition, not a suggestion.
+- RCA packets must include a `requires_phase_rewind_to` field when the root cause originates in a phase earlier than the one that failed. The orchestrator reads this from the JSON artifact on disk.
+- CRs are processed one at a time (first `proposed` CR is routed and marked `approved` before the next is considered).
 
 ---
 

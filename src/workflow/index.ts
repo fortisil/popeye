@@ -28,6 +28,7 @@ import {
   type TaskExecutionResult,
 } from './execution-mode.js';
 import { getWorkflowLogger } from './workflow-logger.js';
+import { runPipeline, resumePipeline } from '../pipeline/orchestrator.js';
 // Types are re-exported via export * from statements below
 
 // Re-export submodules
@@ -98,6 +99,31 @@ export async function runWorkflow(
   options: WorkflowOptions
 ): Promise<WorkflowResult> {
   const { projectDir, consensusConfig, maxRetries, onProgress } = options;
+
+  // P0-5: Pipeline mode check — use full autonomy pipeline unless legacy mode
+  const useLegacy = process.env.POPEYE_LEGACY_WORKFLOW === '1' || process.env.POPEYE_LEGACY_WORKFLOW === 'true';
+  if (!useLegacy) {
+    try {
+      const state = await loadProject(projectDir).catch(() => null);
+      if (state) {
+        const result = await runPipeline({
+          projectDir,
+          state,
+          consensusConfig,
+          onPhaseStart: (phase) => onProgress?.('pipeline', `Starting phase: ${phase}`),
+          onProgress: (msg) => onProgress?.('pipeline', msg),
+        });
+        return {
+          success: result.success,
+          state: await loadProject(projectDir).catch(() => ({} as ProjectState)),
+          error: result.error,
+        };
+      }
+    } catch {
+      // Fall through to legacy workflow on pipeline error
+      onProgress?.('workflow', 'Pipeline mode failed, falling back to legacy workflow...');
+    }
+  }
 
   // Initialize workflow logger
   const logger = getWorkflowLogger(projectDir);
@@ -205,6 +231,28 @@ export async function resumeWorkflow(
   options: ResumeWorkflowOptions
 ): Promise<WorkflowResult> {
   const { consensusConfig, maxRetries, onProgress, additionalContext } = options;
+
+  // P0-5: Pipeline mode check
+  const useLegacy = process.env.POPEYE_LEGACY_WORKFLOW === '1' || process.env.POPEYE_LEGACY_WORKFLOW === 'true';
+  if (!useLegacy) {
+    try {
+      const state = await loadProject(projectDir);
+      const result = await resumePipeline({
+        projectDir,
+        state,
+        consensusConfig,
+        onPhaseStart: (phase) => onProgress?.('pipeline', `Resuming phase: ${phase}`),
+        onProgress: (msg) => onProgress?.('pipeline', msg),
+      });
+      return {
+        success: result.success,
+        state: await loadProject(projectDir).catch(() => ({} as ProjectState)),
+        error: result.error,
+      };
+    } catch {
+      onProgress?.('workflow', 'Pipeline resume failed, falling back to legacy workflow...');
+    }
+  }
 
   // Initialize workflow logger
   const logger = getWorkflowLogger(projectDir);

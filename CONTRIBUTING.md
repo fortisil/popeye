@@ -185,8 +185,14 @@ src/
 ├── cli/           # CLI commands and interface
 ├── config/        # Configuration management
 ├── generators/    # Project scaffolding
+├── pipeline/      # Full autonomy pipeline engine (14-phase state machine)
+│   ├── orchestrator.ts    # Main loop with CR routing, constitution check, gate merge
+│   ├── gate-engine.ts     # Deterministic gate evaluation
+│   ├── phases/            # Phase handler implementations
+│   └── type-defs/         # Pipeline-specific type definitions
 ├── state/         # State management
 ├── types/         # TypeScript type definitions
+├── upgrade/       # Project type upgrade system
 └── workflow/      # Core workflow logic
     ├── plan-storage.ts      # Consensus docs per-app storage
     └── workspace-manager.ts # Multi-app workspace management
@@ -257,6 +263,14 @@ Understanding the codebase:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
+│                    Pipeline Layer                             │
+│  (pipeline/*.ts - 14-phase autonomy engine, gate machine)   │
+│  Orchestrator -> Gate Engine -> Phase Handlers               │
+│  Constitution verification, CR routing, RCA rewind           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
 │                     Workflow Layer                           │
 │  (workflow/*.ts - Plan mode, Execution mode, Consensus)     │
 └─────────────────────────────────────────────────────────────┘
@@ -264,7 +278,7 @@ Understanding the codebase:
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                     Adapter Layer                            │
-│  (adapters/*.ts - Claude, OpenAI, Gemini)                   │
+│  (adapters/*.ts - Claude, OpenAI, Gemini, Grok)             │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼

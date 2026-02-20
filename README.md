@@ -1606,6 +1606,18 @@ src/
 │   ├── handlers.ts       # Upgrade handlers (4 paths with file scaffolding)
 │   ├── index.ts          # Transactional orchestrator with backup/rollback
 │   └── context.ts        # Builds rich context for post-upgrade planning
+├── pipeline/             # Full autonomy pipeline engine (14 phases)
+│   ├── orchestrator.ts   # Top-level loop: phase dispatch, CR routing, constitution check
+│   ├── gate-engine.ts    # Deterministic state machine: gate definitions, evaluation
+│   ├── constitution.ts   # Constitution hashing and integrity verification (SHA-256)
+│   ├── change-request.ts # CR builder, routing (change_type -> consensus phase)
+│   ├── artifact-manager.ts # Artifact creation, storage, versioning
+│   ├── skill-loader.ts   # Role skill prompt loading from skills/ directory
+│   ├── repo-snapshot.ts  # Repo snapshot generation and diffing
+│   ├── consensus/        # Consensus runner for pipeline phases
+│   ├── phases/           # Phase handlers (intake, review, audit, recovery, etc.)
+│   ├── type-defs/        # Pipeline type definitions (state, enums, artifacts, packets)
+│   └── packets/          # Packet builders (audit report, consensus, RCA)
 ├── workflow/             # Workflow engine
 │   ├── consensus.ts      # Consensus loop (reviewerPersona threading)
 │   ├── plan-mode.ts      # Planning phase (strategy generation, monorepo-aware)
@@ -1644,6 +1656,51 @@ src/
     ├── database-runtime.ts # SetupStepResult, ReadinessCheck runtime schemas
     └── website-strategy.ts # WebsiteStrategyDocument, BrandAssetsContract, DesignTokens
 ```
+
+### Full Autonomy Pipeline Engine
+
+The `src/pipeline/` module implements the 14-phase deterministic pipeline defined in the `POPEYE_FULL_AUTONOMY_PIPELINE.md` spec. The pipeline drives a project from a single idea prompt through to production-ready status.
+
+#### Pipeline Phases
+
+```
+INTAKE -> CONSENSUS_MASTER_PLAN -> ARCHITECTURE -> CONSENSUS_ARCHITECTURE
+  -> ROLE_PLANNING -> CONSENSUS_ROLE_PLANS -> IMPLEMENTATION -> QA_VALIDATION
+  -> REVIEW -> AUDIT -> PRODUCTION_GATE -> DONE
+  (RECOVERY_LOOP on any gate failure, STUCK after max recovery iterations)
+```
+
+Each phase has:
+- **Required artifacts** that must exist before the gate passes
+- **Required checks** (build, test, lint, typecheck for PRODUCTION_GATE)
+- **Consensus threshold** (0.95 for plan phases)
+- **Allowed transitions** (strictly enforced, no phase skipping)
+
+#### Autonomy Hardening (v1.1)
+
+The orchestrator main loop includes three behaviors between phase execution and transition:
+
+1. **Constitution Verification**: Before every `evaluateGate()` call, the orchestrator verifies that `skills/POPEYE_CONSTITUTION.md` has not been modified since pipeline start (SHA-256 hash comparison). If the constitution is invalid, the gate is blocked with a specific reason.
+
+2. **Gate Result Merging**: After gate evaluation, `mergeGateResult()` preserves `score`/`consensusScore` values stored by consensus phase handlers while updating `pass`/`blockers` from the gate engine. This prevents consensus scores from being overwritten.
+
+3. **CR Routing**: After REVIEW and AUDIT phases pass their gates, the orchestrator checks `pipeline.pendingChangeRequests` for any `proposed` Change Requests. If found, the pipeline deterministically routes to the appropriate consensus phase rather than continuing normal progression.
+
+#### Change Request System
+
+| Change Type | Routes To |
+|-------------|-----------|
+| `scope` | `CONSENSUS_MASTER_PLAN` |
+| `architecture` | `CONSENSUS_ARCHITECTURE` |
+| `dependency` | `CONSENSUS_ROLE_PLANS` |
+| `config` | `QA_VALIDATION` |
+| `requirement` | `CONSENSUS_MASTER_PLAN` |
+
+CR Lifecycle: `proposed` (created by REVIEW/AUDIT) -> `approved` (routed by orchestrator) or `rejected`.
+
+#### Recovery and RCA Rewind
+
+When any gate fails, the pipeline enters RECOVERY_LOOP. After successful recovery, the orchestrator reads the latest RCA artifact from disk and checks for a `requires_phase_rewind_to` field. If present, the pipeline rewinds to that specific phase instead of retesting the originally failed phase. This allows root-cause-aware recovery (e.g., an implementation failure caused by an architecture gap can rewind to ARCHITECTURE).
 
 ## Development
 
