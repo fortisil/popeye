@@ -43,8 +43,8 @@ export interface ReviewerProviderConfig {
 }
 
 const DEFAULT_PROVIDERS: ReviewerProviderConfig[] = [
-  { provider: 'openai', model: 'gpt-4o', temperature: 0.3 },
-  { provider: 'gemini', model: 'gemini-2.0-flash', temperature: 0.3 },
+  { provider: 'openai', model: 'gpt-4.1', temperature: 0.3 },
+  { provider: 'gemini', model: 'gemini-2.5-flash', temperature: 0.3 },
 ];
 
 // ─── Consensus Runner ────────────────────────────────────
@@ -138,7 +138,7 @@ export class ConsensusRunner {
       const vote: ReviewerVote = {
         reviewer_id: 'iterative-reviewer',
         provider: 'openai',
-        model: this.config.consensusConfig?.openaiModel ?? 'gpt-4o',
+        model: this.config.consensusConfig?.openaiModel ?? 'gpt-4.1',
         temperature: this.config.consensusConfig?.temperature ?? 0.3,
         prompt_hash: createHash('sha256').update(prompt).digest('hex'),
         vote: result.approved ? 'APPROVE' : 'REJECT',

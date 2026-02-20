@@ -101,8 +101,8 @@ export interface ConsensusConfig {
 export const DEFAULT_CONSENSUS_CONFIG: Omit<ConsensusConfig, 'openaiKey' | 'geminiKey' | 'grokKey'> = {
   threshold: 95,
   maxIterations: 10,
-  openaiModel: 'gpt-4o',
-  geminiModel: 'gemini-2.0-flash',
+  openaiModel: 'gpt-4.1',
+  geminiModel: 'gemini-2.5-flash',
   grokModel: DEFAULT_GROK_MODEL,
   reviewer: 'openai',
   arbitrator: 'gemini',
@@ -122,7 +122,19 @@ export const AIProviderSchema = z.enum(['openai', 'gemini', 'grok']);
 /**
  * Known Gemini models (used for suggestions and display, not strict validation)
  */
-export const KNOWN_GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'] as const;
+export const KNOWN_GEMINI_MODELS = [
+  'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
+  'gemini-2.0-flash', 'gemini-2.0-pro',
+  'gemini-1.5-pro', 'gemini-1.5-flash',
+] as const;
+
+/**
+ * Known Grok models (used for suggestions and display, not strict validation)
+ */
+export const KNOWN_GROK_MODELS = [
+  'grok-4-0709', 'grok-3', 'grok-3-mini',
+  'grok-3-fast', 'grok-3-mini-fast', 'grok-2',
+] as const;
 
 /**
  * Zod schema for Gemini model - accepts any non-empty string to support new models
@@ -144,7 +156,7 @@ export const ConsensusConfigSchema = z.object({
   geminiKey: z.string().optional(),
   grokKey: z.string().optional(),
   openaiModel: OpenAIModelSchema,
-  geminiModel: GeminiModelSchema.default('gemini-2.0-flash'),
+  geminiModel: GeminiModelSchema.default('gemini-2.5-flash'),
   grokModel: GrokModelSchema.default(DEFAULT_GROK_MODEL),
   reviewer: AIProviderSchema.default('openai'),
   arbitrator: AIProviderSchema.default('gemini'),

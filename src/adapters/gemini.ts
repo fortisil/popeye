@@ -16,7 +16,7 @@ export type GeminiModel = string;
  * Default Gemini configuration
  */
 export const DEFAULT_GEMINI_CONFIG = {
-  model: 'gemini-2.0-flash' as GeminiModel,
+  model: 'gemini-2.5-flash' as GeminiModel,
   temperature: 0.3,
   maxTokens: 4096,
 };
@@ -94,7 +94,7 @@ export async function requestArbitration(
   scores: number[]
 ): Promise<ArbitrationResult> {
   const client = await createClient();
-  const generativeModel = client.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  const generativeModel = client.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
   const prompt = buildArbitrationPrompt(plan, reviewerFeedback, claudeFeedback, iterations, scores);
 
@@ -370,7 +370,7 @@ function parseList(text: string): string[] {
 export async function validateApiKey(): Promise<boolean> {
   try {
     const client = await createClient();
-    const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' });
     await model.generateContent('Say "OK" if you can hear me.');
     return true;
   } catch {

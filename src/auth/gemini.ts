@@ -30,7 +30,7 @@ export interface GeminiAuthStatus {
 export async function validateGeminiToken(apiKey: string): Promise<boolean> {
   try {
     const client = new GoogleGenerativeAI(apiKey);
-    const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = client.getGenerativeModel({ model: 'gemini-2.5-flash' });
     // Test the key by making a simple request
     await model.generateContent('Say "OK"');
     return true;

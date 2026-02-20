@@ -142,7 +142,7 @@ Respond with ONLY valid JSON, no markdown code fences or explanation.`;
   onProgress?.('Generating website strategy via AI...');
 
   const completion = await client.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-4.1',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.4,
     max_tokens: 4096,

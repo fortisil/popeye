@@ -10,6 +10,7 @@ import { ProjectSpecSchema, type OutputLanguage, type OpenAIModel } from '../../
 import { requireAuth } from '../../auth/index.js';
 import { runWorkflow } from '../../workflow/index.js';
 import { generateProject, projectDirExists, cleanupProject } from '../../generators/index.js';
+import { readPopeyeMdConfig } from '../../config/popeye-md.js';
 import {
   printHeader,
   printSection,
@@ -41,8 +42,8 @@ export function createCreateCommand(): Command {
     )
     .option(
       '-m, --model <model>',
-      'OpenAI model for consensus (gpt-4o, gpt-4o-mini, o1-preview)',
-      'gpt-4o'
+      'OpenAI model for consensus (gpt-4.1, gpt-4o, o3, o4-mini)',
+      'gpt-4.1'
     )
     .option(
       '-o, --output <dir>',
@@ -93,9 +94,8 @@ export function createCreateCommand(): Command {
         }
 
         const model = options.model as OpenAIModel;
-        const validModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'];
-        if (!validModels.includes(model)) {
-          printError(`Invalid model: ${model}. Use one of: ${validModels.join(', ')}`);
+        if (!model || model.trim().length === 0) {
+          printError('Model name must not be empty.');
           process.exit(1);
         }
 
@@ -173,15 +173,21 @@ export function createCreateCommand(): Command {
           succeedSpinner(`Created ${scaffoldResult.filesCreated.length} files`);
         }
 
-        // Run the workflow
+        // Run the workflow — merge CLI flags with popeye.md config
         printSection('Workflow Execution');
 
+        const popeyeConfig = await readPopeyeMdConfig(projectDir);
         const workflowResult = await runWorkflow(spec, {
           projectDir,
           consensusConfig: {
             threshold,
             maxIterations,
             openaiModel: model,
+            reviewer: popeyeConfig?.reviewer ?? 'openai',
+            arbitrator: popeyeConfig?.arbitrator,
+            enableArbitration: popeyeConfig?.enableArbitration ?? false,
+            geminiModel: popeyeConfig?.geminiModel,
+            grokModel: popeyeConfig?.grokModel,
           },
           onProgress: (phase, message) => {
             handleProgressUpdate(phase, message);

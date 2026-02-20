@@ -242,7 +242,12 @@ export interface WebsiteSpec {
 /**
  * Known OpenAI models (used for suggestions and display, not strict validation)
  */
-export const KNOWN_OPENAI_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'] as const;
+export const KNOWN_OPENAI_MODELS = [
+  'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+  'o3', 'o3-mini', 'o4-mini',
+  'gpt-4o', 'gpt-4o-mini',
+  'gpt-4-turbo', 'o1-preview', 'o1-mini',
+] as const;
 
 /**
  * OpenAI model schema - accepts any non-empty string to support new models
@@ -289,24 +294,48 @@ export interface GenerationOptions {
  * Available OpenAI models with descriptions
  */
 export const OPENAI_MODELS: Record<OpenAIModel, { description: string; recommended: string }> = {
-  'gpt-4o': {
-    description: 'Most capable, best reasoning',
+  'gpt-4.1': {
+    description: 'Smartest non-reasoning model, 1M context',
     recommended: 'Complex projects',
+  },
+  'gpt-4.1-mini': {
+    description: 'Fast, strong instruction following',
+    recommended: 'Medium complexity',
+  },
+  'gpt-4.1-nano': {
+    description: 'Fastest, most cost-efficient',
+    recommended: 'Simple projects',
+  },
+  'o3': {
+    description: 'Strongest reasoning model',
+    recommended: 'Architectural decisions',
+  },
+  'o3-mini': {
+    description: 'Efficient reasoning',
+    recommended: 'Code review',
+  },
+  'o4-mini': {
+    description: 'Fast reasoning, best on STEM',
+    recommended: 'Technical analysis',
+  },
+  'gpt-4o': {
+    description: 'Multimodal, strong all-rounder',
+    recommended: 'General purpose',
   },
   'gpt-4o-mini': {
     description: 'Fast, cost-effective',
-    recommended: 'Simple projects',
+    recommended: 'Simple tasks',
   },
   'gpt-4-turbo': {
-    description: 'High capability, faster',
-    recommended: 'Medium complexity',
+    description: 'High capability, legacy',
+    recommended: 'Backward compatibility',
   },
   'o1-preview': {
-    description: 'Advanced reasoning',
-    recommended: 'Architectural decisions',
+    description: 'Advanced reasoning (legacy)',
+    recommended: 'Legacy reasoning tasks',
   },
   'o1-mini': {
-    description: 'Efficient reasoning',
-    recommended: 'Code review',
+    description: 'Efficient reasoning (legacy)',
+    recommended: 'Legacy reasoning tasks',
   },
 };

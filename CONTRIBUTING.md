@@ -24,7 +24,7 @@ This project and everyone participating in it is governed by our commitment to p
 
 ## Getting Started
 
-Popeye CLI is built with TypeScript and uses several AI providers (Claude, OpenAI, Gemini) for its consensus-based code generation workflow.
+Popeye CLI is built with TypeScript and uses several AI providers (Claude, OpenAI, Gemini, Grok) for its consensus-based code generation workflow.
 
 ### Prerequisites
 
@@ -183,11 +183,12 @@ src/
 ├── adapters/      # AI provider integrations
 ├── auth/          # Authentication handling
 ├── cli/           # CLI commands and interface
-├── config/        # Configuration management
+├── config/        # Configuration management (includes popeye-md.ts shared reader)
 ├── generators/    # Project scaffolding
 ├── pipeline/      # Full autonomy pipeline engine (14-phase state machine)
 │   ├── orchestrator.ts    # Main loop with CR routing, constitution check, gate merge
 │   ├── gate-engine.ts     # Deterministic gate evaluation
+│   ├── bridges/           # Integration bridges (review-bridge.ts for /review -> pipeline)
 │   ├── phases/            # Phase handler implementations
 │   └── type-defs/         # Pipeline-specific type definitions
 ├── state/         # State management
@@ -287,6 +288,26 @@ Understanding the codebase:
 │  (state/*.ts - Project state, persistence)                  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### AI Model Conventions
+
+All three AI providers (OpenAI, Gemini, Grok) use **flexible string validation** (`z.string().min(1)`) for model names, not strict enums. This means:
+
+- Any valid model string is accepted, supporting newly released models immediately
+- Known model lists (`KNOWN_OPENAI_MODELS`, `KNOWN_GEMINI_MODELS`, `KNOWN_GROK_MODELS`) are used for display/suggestions only, not validation
+- Default models as of Feb 2026: OpenAI `gpt-4.1`, Gemini `gemini-2.5-flash`, Grok `grok-3`
+- When adding a new known model, update the `KNOWN_*_MODELS` constant in the relevant types file and update the corresponding `OPENAI_MODELS` record in `src/types/project.ts` if it is an OpenAI model
+
+### Bridge Pattern (Pipeline Integration)
+
+When existing CLI features need to work with the pipeline system, create a **bridge module** in `src/pipeline/bridges/`. Bridges:
+
+- Detect whether the project is pipeline-managed via state inspection
+- Convert between workflow types and pipeline types (e.g., severity mappings, category mappings)
+- Produce pipeline-native artifacts and Change Requests instead of modifying `state.json` directly
+- Keep the pipeline as the single source of truth for pipeline-managed projects
+
+See `review-bridge.ts` as the reference implementation.
 
 ## Questions?
 

@@ -141,7 +141,7 @@ describe('DEFAULT_CONSENSUS_CONFIG', () => {
   it('should have valid default values', () => {
     expect(DEFAULT_CONSENSUS_CONFIG.threshold).toBe(95);
     expect(DEFAULT_CONSENSUS_CONFIG.maxIterations).toBe(10);
-    expect(DEFAULT_CONSENSUS_CONFIG.openaiModel).toBe('gpt-4o');
+    expect(DEFAULT_CONSENSUS_CONFIG.openaiModel).toBe('gpt-4.1');
     expect(DEFAULT_CONSENSUS_CONFIG.temperature).toBe(0.3);
     expect(DEFAULT_CONSENSUS_CONFIG.maxTokens).toBe(4096);
   });

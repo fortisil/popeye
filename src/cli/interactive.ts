@@ -46,7 +46,7 @@ import { upgradeProject } from '../upgrade/index.js';
 import { buildUpgradeContext } from '../upgrade/context.js';
 import { OutputLanguageSchema, KNOWN_OPENAI_MODELS } from '../types/project.js';
 import type { ProjectSpec, OutputLanguage, OpenAIModel } from '../types/project.js';
-import { GeminiModelSchema, KNOWN_GEMINI_MODELS } from '../types/consensus.js';
+import { GeminiModelSchema, KNOWN_GEMINI_MODELS, KNOWN_GROK_MODELS } from '../types/consensus.js';
 import { OpenAIModelSchema } from '../types/project.js';
 import type { AIProvider, GeminiModel, GrokModel } from '../types/consensus.js';
 import {
@@ -1205,6 +1205,35 @@ async function handleReviewSlashCommand(state: SessionState, args: string[] = []
   }
 
   try {
+    // Check if project is pipeline-managed — route through bridge
+    const { loadProject } = await import('../state/index.js');
+    const projectState = await loadProject(state.projectDir);
+    const { isPipelineManaged, runReviewBridge } = await import('../pipeline/bridges/review-bridge.js');
+
+    if (isPipelineManaged(projectState)) {
+      printInfo('Pipeline-managed project detected — routing through pipeline bridge');
+      console.log();
+
+      const bridgeResult = await runReviewBridge({
+        projectDir: state.projectDir,
+        depth: options.depth,
+        strict: options.strict,
+        onProgress: (_stage, msg) => printInfo(msg),
+      });
+
+      if (bridgeResult.success) {
+        printSuccess(`Audit score: ${bridgeResult.overallScore}% — ${bridgeResult.recommendation}`);
+        printInfo(`${bridgeResult.findingsCount} finding(s), ${bridgeResult.changeRequestCount} CR(s) created, ${bridgeResult.artifactsCreated} artifact(s) stored`);
+        if (bridgeResult.changeRequestCount > 0) {
+          printInfo('Change Requests filed — run /resume to let the pipeline process them');
+        }
+      } else {
+        printError(bridgeResult.error ?? 'Review bridge failed');
+      }
+      return;
+    }
+
+    // Non-pipeline project — use legacy audit-mode
     const { runReview } = await import('./commands/review.js');
 
     console.log();
@@ -1484,7 +1513,7 @@ function handleLanguage(args: string[], state: SessionState): void {
 const KNOWN_MODELS: Record<string, readonly string[]> = {
   openai: KNOWN_OPENAI_MODELS,
   gemini: KNOWN_GEMINI_MODELS,
-  grok: ['grok-3', 'grok-3-mini', 'grok-2'],
+  grok: KNOWN_GROK_MODELS,
 };
 
 /**
@@ -2976,7 +3005,7 @@ export async function startInteractiveMode(): Promise<void> {
     projectDir: process.cwd(),
     language: config.project.default_language,
     openaiModel: config.apis.openai.model,
-    geminiModel: 'gemini-2.0-flash',
+    geminiModel: 'gemini-2.5-flash',
     grokModel: config.apis.grok.model,
     claudeAuth: false,
     openaiAuth: false,

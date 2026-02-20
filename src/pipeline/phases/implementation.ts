@@ -26,11 +26,15 @@ export async function runImplementation(context: PhaseContext): Promise<PhaseRes
         .join('\n\n');
     }
 
-    // Run existing execution mode with optional role context
+    // Merge session guidance with role prompt so execution sees user intent
+    const guidance = pipeline.sessionGuidance;
+    const systemPrompt = [combinedRolePrompt, guidance].filter(Boolean).join('\n\n') || undefined;
+
+    // Run existing execution mode with optional role context + guidance
     const { runExecutionMode } = await import('../../workflow/execution-mode.js');
     await runExecutionMode({
       projectDir,
-      ...(combinedRolePrompt ? { systemPrompt: combinedRolePrompt } : {}),
+      ...(systemPrompt ? { systemPrompt } : {}),
     });
 
     // Generate post-implementation repo snapshot

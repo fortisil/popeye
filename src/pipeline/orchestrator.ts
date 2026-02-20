@@ -53,6 +53,8 @@ export interface PipelineOptions {
   projectDir: string;
   state: ProjectState;
   consensusConfig?: Partial<ConsensusConfig>;
+  /** User steering, upgrade context, or resume instructions */
+  additionalContext?: string;
   onPhaseStart?: (phase: PipelinePhase) => void;
   onPhaseComplete?: (phase: PipelinePhase, result: PhaseResult) => void;
   onProgress?: (message: string) => void;
@@ -88,6 +90,7 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
     projectDir,
     state,
     consensusConfig,
+    additionalContext,
     onPhaseStart,
     onPhaseComplete,
     onProgress,
@@ -96,6 +99,11 @@ export async function runPipeline(options: PipelineOptions): Promise<PipelineRes
   // Initialize pipeline state if needed
   const pipeline: PipelineState = (state as unknown as { pipeline?: PipelineState }).pipeline
     ?? createDefaultPipelineState();
+
+  // Persist user guidance in pipeline state so it survives resume
+  if (additionalContext && !pipeline.sessionGuidance) {
+    pipeline.sessionGuidance = additionalContext;
+  }
 
   // Create context dependencies
   const gateEngine = createGateEngine();

@@ -23,7 +23,7 @@ describe('DEFAULT_CONFIG', () => {
   });
 
   it('should have valid API defaults', () => {
-    expect(DEFAULT_CONFIG.apis.openai.model).toBe('gpt-4o');
+    expect(DEFAULT_CONFIG.apis.openai.model).toBe('gpt-4.1');
     expect(DEFAULT_CONFIG.apis.openai.temperature).toBe(0.3);
     expect(DEFAULT_CONFIG.apis.openai.max_tokens).toBe(4096);
   });
@@ -122,11 +122,11 @@ describe('ConfigSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('should reject invalid model', () => {
+  it('should reject empty model string', () => {
     const config = {
       apis: {
         openai: {
-          model: 'gpt-5',
+          model: '',
         },
       },
     };

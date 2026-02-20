@@ -12,6 +12,7 @@ import {
   resetWorkflow,
   cancelWorkflow,
 } from '../../workflow/index.js';
+import { readPopeyeMdConfig } from '../../config/popeye-md.js';
 import type { WorkflowPhase } from '../../types/workflow.js';
 import {
   printHeader,
@@ -94,13 +95,20 @@ export function createResumeCommand(): Command {
           process.exit(1);
         }
 
-        // Resume workflow
+        // Resume workflow — merge CLI flags with popeye.md config
         printSection('Resuming Workflow');
 
+        const popeyeConfig = await readPopeyeMdConfig(projectDir);
         const result = await resumeWorkflow(projectDir, {
           consensusConfig: {
             threshold,
             maxIterations,
+            reviewer: popeyeConfig?.reviewer ?? 'openai',
+            arbitrator: popeyeConfig?.arbitrator,
+            enableArbitration: popeyeConfig?.enableArbitration ?? false,
+            openaiModel: popeyeConfig?.openaiModel,
+            geminiModel: popeyeConfig?.geminiModel,
+            grokModel: popeyeConfig?.grokModel,
           },
           maxRetries,
           onProgress: (phase, message) => {

@@ -33,9 +33,11 @@ export async function runRecoveryLoop(context: PhaseContext): Promise<PhaseResul
 
     // 3. Generate RCA via Claude with Debugger skill
     const { executePrompt } = await import('../../adapters/claude.js');
+    const guidance = pipeline.sessionGuidance;
     const rcaPrompt = [
       debuggerSkill.systemPrompt,
       '',
+      ...(guidance ? ['## User Guidance', guidance, ''] : []),
       '## Failure Evidence',
       failureEvidence,
       '',

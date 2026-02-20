@@ -349,7 +349,7 @@ export async function upgradeFullstackToAll(
       idea: 'Marketing website',
       name: projectName,
       language: 'all',
-      openaiModel: 'gpt-4o',
+      openaiModel: 'gpt-4.1',
     };
 
     // Build content context from user docs, brand assets, and strategy
@@ -421,7 +421,7 @@ export async function upgradeSingleToFullstack(
     if (!(await pathExists(frontendDir))) {
       const spec: ProjectSpec = {
         idea: 'Frontend application', name: projectName,
-        language: 'fullstack', openaiModel: 'gpt-4o',
+        language: 'fullstack', openaiModel: 'gpt-4.1',
       };
       const result = await generateTypeScriptProject(spec, path.join(projectDir, 'apps'), {
         baseDir: frontendDir,
@@ -439,7 +439,7 @@ export async function upgradeSingleToFullstack(
     if (!(await pathExists(backendDir))) {
       const spec: ProjectSpec = {
         idea: 'Backend API', name: projectName,
-        language: 'fullstack', openaiModel: 'gpt-4o',
+        language: 'fullstack', openaiModel: 'gpt-4.1',
       };
       const result = await generatePythonProject(spec, path.join(projectDir, 'apps'), {
         baseDir: backendDir,
@@ -508,7 +508,7 @@ export async function upgradeWebsiteToAll(
   if (!(await pathExists(frontendDir))) {
     const spec: ProjectSpec = {
       idea: 'Frontend application', name: projectName,
-      language: 'all', openaiModel: 'gpt-4o',
+      language: 'all', openaiModel: 'gpt-4.1',
     };
     const result = await generateTypeScriptProject(spec, path.join(projectDir, 'apps'), {
       baseDir: frontendDir,
@@ -520,7 +520,7 @@ export async function upgradeWebsiteToAll(
   if (!(await pathExists(backendDir))) {
     const spec: ProjectSpec = {
       idea: 'Backend API', name: projectName,
-      language: 'all', openaiModel: 'gpt-4o',
+      language: 'all', openaiModel: 'gpt-4.1',
     };
     const result = await generatePythonProject(spec, path.join(projectDir, 'apps'), {
       baseDir: backendDir,

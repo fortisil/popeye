@@ -23,14 +23,17 @@ export const ConsensusSettingsSchema = z.object({
  * OpenAI API settings schema
  */
 export const OpenAISettingsSchema = z.object({
-  model: z
-    .enum(['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'])
-    .default('gpt-4o'),
+  model: z.string().min(1).default('gpt-4.1'),
   temperature: z.number().min(0).max(2).default(0.3),
   max_tokens: z.number().min(100).max(32000).default(4096),
   available_models: z
     .array(z.string())
-    .default(['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini']),
+    .default([
+      'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+      'o3', 'o3-mini', 'o4-mini',
+      'gpt-4o', 'gpt-4o-mini',
+      'gpt-4-turbo', 'o1-preview', 'o1-mini',
+    ]),
 });
 
 /**
@@ -55,10 +58,15 @@ export const GrokSettingsSchema = z.object({
  */
 export const APISettingsSchema = z.object({
   openai: OpenAISettingsSchema.default({
-    model: 'gpt-4o',
+    model: 'gpt-4.1',
     temperature: 0.3,
     max_tokens: 4096,
-    available_models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'],
+    available_models: [
+      'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+      'o3', 'o3-mini', 'o4-mini',
+      'gpt-4o', 'gpt-4o-mini',
+      'gpt-4-turbo', 'o1-preview', 'o1-mini',
+    ],
   }),
   claude: ClaudeSettingsSchema.default({
     model: 'claude-sonnet-4-20250514',
@@ -139,10 +147,15 @@ export const ConfigSchema = z.object({
   }),
   apis: APISettingsSchema.default({
     openai: {
-      model: 'gpt-4o',
+      model: 'gpt-4.1',
       temperature: 0.3,
       max_tokens: 4096,
-      available_models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-preview', 'o1-mini'],
+      available_models: [
+        'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano',
+        'o3', 'o3-mini', 'o4-mini',
+        'gpt-4o', 'gpt-4o-mini',
+        'gpt-4-turbo', 'o1-preview', 'o1-mini',
+      ],
     },
     claude: {
       model: 'claude-sonnet-4-20250514',

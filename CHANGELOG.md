@@ -2,6 +2,61 @@
 
 All notable changes to Popeye CLI are documented in this file.
 
+## [2.1.0] - 2026-02-20
+
+### Added — AI Model Updates (Feb 2026)
+
+- **OpenAI models updated** — New default: `gpt-4.1` (was `gpt-4o`). Added: `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `o3`, `o3-mini`, `o4-mini`. Kept for backward compatibility: `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `o1-preview`, `o1-mini`.
+- **Gemini models updated** — New default: `gemini-2.5-flash` (was `gemini-2.0-flash`). Added: `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-pro`. Kept: `gemini-2.0-flash`, `gemini-1.5-pro`, `gemini-1.5-flash`.
+- **Grok models updated** — Default unchanged: `grok-3`. Added: `grok-4-0709`, `grok-3-fast`, `grok-3-mini-fast`. Created proper `KNOWN_GROK_MODELS` constant (was hardcoded in interactive.ts). Kept: `grok-3`, `grok-3-mini`, `grok-2`.
+- **`KNOWN_GROK_MODELS`** constant in `src/types/consensus.ts` — matches `KNOWN_OPENAI_MODELS` and `KNOWN_GEMINI_MODELS` pattern.
+
+### Changed — Model Flexibility
+
+- `OpenAISettingsSchema` now uses `z.string().min(1)` instead of strict `z.enum()` — custom/new model names accepted everywhere.
+- `ProjectStateSchema.openaiModel` now uses flexible `z.string().min(1)` — was blocking unrecognized models in state persistence.
+- Removed strict `validModels` check in `create.ts` that rejected models not in the predefined list.
+- Files changed: `src/types/project.ts`, `src/types/consensus.ts`, `src/types/workflow.ts`, `src/types/index.ts`, `src/config/schema.ts`, `src/config/defaults.ts`, `src/adapters/openai.ts`, `src/adapters/gemini.ts`, `src/auth/gemini.ts`, `src/cli/interactive.ts`, `src/cli/commands/create.ts`, `src/upgrade/handlers.ts`, `src/workflow/website-strategy.ts`, `src/pipeline/consensus/consensus-runner.ts`.
+
+### Added — Review Bridge (/review -> Pipeline AUDIT Integration)
+
+- **Review Bridge** (`src/pipeline/bridges/review-bridge.ts`, ~370 lines) — Bridge module connecting `/review` to the pipeline artifact and Change Request system for pipeline-managed projects.
+  - `isPipelineManaged()` / `extractPipelineState()` — pipeline state detection helpers.
+  - `mapSeverity()` — severity mapping: critical to P0, major to P1, minor to P2, info to P3.
+  - `mapCategory()` — category mapping for workflow finding categories to pipeline categories.
+  - `categoryToChangeType()` — CR routing: integration/schema to architecture, security to requirement, tests/config/deployment to config.
+  - `convertFinding()` — converts workflow `AuditFinding` to pipeline `AuditFinding` with evidence refs.
+  - `runReviewBridge()` — full orchestrator: snapshot, scan, analyze, convert, create artifacts, create CRs, persist.
+- Modified `handleReviewSlashCommand` in `src/cli/interactive.ts` — detects pipeline-managed state and routes through the bridge (no milestone injection on pipeline projects).
+- Created `tests/pipeline/bridges/review-bridge.test.ts` — 29 tests covering severity/category/CR mapping, finding conversion, pipeline detection, and CR routing determinism.
+
+### Added — Pipeline Entry Point Integration v2.1
+
+- **Fix A (P0): Thread `additionalContext` through pipeline**
+  - Added `sessionGuidance` to `PipelineStateSchema` — persists user steering/upgrade context across phases.
+  - Added `'additional_context'` artifact type.
+  - Orchestrator accepts `additionalContext` option and stores in pipeline state.
+  - INTAKE phase prepends guidance to plan input and creates `additional_context` artifact.
+  - IMPLEMENTATION phase merges guidance with role prompt in system prompt.
+  - RECOVERY_LOOP phase includes guidance in RCA prompt.
+  - `resumeWorkflow()` passes `additionalContext` through to pipeline.
+- **Fix B (P0): New projects use pipeline from start**
+  - `runWorkflow()` bootstraps state via `createProject()` when `loadProject()` fails.
+  - Pipeline runs from INTAKE for fresh projects instead of skipping to legacy workflow.
+- **Fix C (P1): CLI commands load full consensus config**
+  - Created `src/config/popeye-md.ts` — shared `readPopeyeMdConfig()` reader with `PopeyeMdConfig` interface.
+  - CLI `create` and `resume` commands now load reviewer/arbitrator/model settings from `popeye.md`.
+
+### Added — Tests
+
+- 29 new tests in `tests/pipeline/bridges/review-bridge.test.ts`.
+- 16 tests in `tests/pipeline/session-guidance.test.ts` (sessionGuidance threading, artifact type, injection into intake/implementation/recovery).
+- 3 tests in `tests/workflow/pipeline-bootstrap.test.ts` (state bootstrap, existing state, legacy fallback).
+- 9 tests in `tests/config/popeye-md.test.ts` (parsing, model fields, arbitrator off, missing fields, notes).
+- Total: **1268 tests passing** across **76 test files**.
+
+---
+
 ## [2.0.0] - 2026-02-20
 
 ### Breaking Changes

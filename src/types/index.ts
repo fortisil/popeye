@@ -58,6 +58,7 @@ export {
   DEFAULT_GROK_MODEL,
   AIProviderSchema,
   KNOWN_GEMINI_MODELS,
+  KNOWN_GROK_MODELS,
   GeminiModelSchema,
   GrokModelSchema,
   type AIProvider,

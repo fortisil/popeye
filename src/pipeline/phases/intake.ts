@@ -27,17 +27,31 @@ export async function runIntake(context: PhaseContext): Promise<PhaseResult> {
     }
     pipeline.constitutionHash = computeConstitutionHash(projectDir);
 
-    // 3. Expand idea using existing workflow
+    // 3. Store additional_context artifact if session guidance provided
+    const guidance = pipeline.sessionGuidance ?? '';
+    if (guidance) {
+      const ctxEntry = artifactManager.createAndStoreText(
+        'additional_context',
+        guidance,
+        'INTAKE',
+      );
+      artifacts.push(ctxEntry);
+    }
+
+    // 4. Expand idea using existing workflow
     const { expandIdea, createPlan } = await import('../../workflow/plan-mode.js');
     const expandedIdea = await expandIdea(
       context.state.specification ?? context.state.idea ?? '',
       context.state.language,
     );
 
-    // 4. Create master plan using existing workflow
-    const plan = await createPlan(expandedIdea, '', context.state.language);
+    // 5. Create master plan — prepend guidance so planner sees constraints first
+    const planInput = guidance
+      ? `${guidance}\n\n---\n\n${expandedIdea}`
+      : expandedIdea;
+    const plan = await createPlan(planInput, '', context.state.language);
 
-    // 5. Store master plan as artifact
+    // 6. Store master plan as artifact
     const planEntry = artifactManager.createAndStoreText(
       'master_plan',
       plan,

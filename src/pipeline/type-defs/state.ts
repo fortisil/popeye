@@ -97,6 +97,8 @@ export const PipelineStateSchema = z.object({
   resolvedCommands: ResolvedCommandsSchema.optional(),
   /** Tracks which phase failed, for recovery routing */
   failedPhase: PipelinePhaseSchema.optional(),
+  /** Session guidance: user steering, upgrade context, or resume instructions */
+  sessionGuidance: z.string().optional(),
   /** Pending change requests that force re-routing to consensus phases (v1.1) */
   pendingChangeRequests: z.array(z.object({
     cr_id: z.string(),

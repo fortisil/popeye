@@ -104,21 +104,24 @@ export async function runWorkflow(
   const useLegacy = process.env.POPEYE_LEGACY_WORKFLOW === '1' || process.env.POPEYE_LEGACY_WORKFLOW === 'true';
   if (!useLegacy) {
     try {
-      const state = await loadProject(projectDir).catch(() => null);
-      if (state) {
-        const result = await runPipeline({
-          projectDir,
-          state,
-          consensusConfig,
-          onPhaseStart: (phase) => onProgress?.('pipeline', `Starting phase: ${phase}`),
-          onProgress: (msg) => onProgress?.('pipeline', msg),
-        });
-        return {
-          success: result.success,
-          state: await loadProject(projectDir).catch(() => ({} as ProjectState)),
-          error: result.error,
-        };
+      // Bootstrap state if it doesn't exist yet (new projects)
+      let state = await loadProject(projectDir).catch(() => null);
+      if (!state) {
+        const { createProject } = await import('../state/index.js');
+        state = await createProject(spec, projectDir);
       }
+      const result = await runPipeline({
+        projectDir,
+        state,
+        consensusConfig,
+        onPhaseStart: (phase) => onProgress?.('pipeline', `Starting phase: ${phase}`),
+        onProgress: (msg) => onProgress?.('pipeline', msg),
+      });
+      return {
+        success: result.success,
+        state: await loadProject(projectDir).catch(() => ({} as ProjectState)),
+        error: result.error,
+      };
     } catch {
       // Fall through to legacy workflow on pipeline error
       onProgress?.('workflow', 'Pipeline mode failed, falling back to legacy workflow...');
@@ -241,6 +244,7 @@ export async function resumeWorkflow(
         projectDir,
         state,
         consensusConfig,
+        additionalContext,
         onPhaseStart: (phase) => onProgress?.('pipeline', `Resuming phase: ${phase}`),
         onProgress: (msg) => onProgress?.('pipeline', msg),
       });

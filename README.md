@@ -109,7 +109,7 @@ The strategy document drives all downstream code generation, ensuring consistent
 Popeye uses multiple AI systems that must agree before implementation begins:
 
 - **Claude (via Claude Agent SDK)**: Primary code execution engine that generates plans, implements code, and runs tests
-- **OpenAI GPT-4** (default reviewer): Evaluates plans for completeness, feasibility, and quality
+- **OpenAI GPT-4.1** (default reviewer): Evaluates plans for completeness, feasibility, and quality
 - **Google Gemini** (optional): Can be configured as reviewer or arbitrator when consensus gets stuck
 - **xAI Grok** (optional): Can be configured as reviewer or arbitrator as an alternative to Gemini
 
@@ -838,7 +838,7 @@ popeye create "A CLI tool for converting markdown to PDF" \
 | `-n, --name <name>` | Project name | Derived from idea |
 | `-l, --language <lang>` | `python`, `typescript`, `fullstack`, `website`, or `all` | `python` |
 | `-d, --directory <dir>` | Output directory | Current directory |
-| `-m, --model <model>` | OpenAI model for consensus | `gpt-4o` |
+| `-m, --model <model>` | OpenAI model for consensus | `gpt-4.1` |
 
 ### `popeye resume`
 
@@ -931,6 +931,8 @@ The audit runs three stages:
 
 Reports are written to `.popeye/popeye.audit.md`, `.popeye/popeye.audit.json`, and optionally `.popeye/popeye.recovery.md`/`.json`. Recovery milestones are injected into the project state and can be executed with `popeye resume`.
 
+**Pipeline-Managed Projects**: When a project has pipeline state (created via the full autonomy pipeline), `/review` automatically routes through the Review Bridge. Instead of injecting recovery milestones into `state.json`, the bridge produces pipeline-native `audit_report` artifacts and Change Requests, keeping the pipeline as the single source of truth. Severity mapping: critical to P0, major to P1, minor to P2, info to P3. CRs are routed to the appropriate consensus phase based on finding category.
+
 ### Interactive Mode
 
 Launch an interactive REPL session:
@@ -987,8 +989,8 @@ The `/model` command supports multi-provider model switching across OpenAI, Gemi
 /model
 
 # Set model for a specific provider
-/model openai gpt-5
-/model gemini gemini-2.5-pro
+/model openai gpt-4.1
+/model gemini gemini-2.5-flash
 /model grok grok-3
 
 # List known models for a provider (suggestions only)
@@ -996,16 +998,16 @@ The `/model` command supports multi-provider model switching across OpenAI, Gemi
 /model gemini list
 
 # Backward compatible: set OpenAI model directly
-/model gpt-4o-mini
+/model gpt-4.1-mini
 ```
 
 **Known Models (for reference):**
 
-| Provider | Known Models |
-|----------|-------------|
-| OpenAI | `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `o1-preview`, `o1-mini` |
-| Gemini | `gemini-2.0-flash`, `gemini-1.5-pro`, `gemini-1.5-flash` |
-| Grok | `grok-3` (flexible string, any model accepted) |
+| Provider | Known Models | Default |
+|----------|-------------|---------|
+| OpenAI | `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `o3`, `o3-mini`, `o4-mini`, `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `o1-preview`, `o1-mini` | `gpt-4.1` |
+| Gemini | `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.0-flash`, `gemini-2.0-pro`, `gemini-1.5-pro`, `gemini-1.5-flash` | `gemini-2.5-flash` |
+| Grok | `grok-4-0709`, `grok-3`, `grok-3-mini`, `grok-3-fast`, `grok-3-mini-fast`, `grok-2` | `grok-3` |
 
 All three model values (openaiModel, geminiModel, grokModel) are:
 - Persisted to `popeye.md` and loaded automatically on resume
@@ -1064,8 +1066,8 @@ When you create a new project, Popeye automatically generates a `popeye.md` file
 language: fullstack
 reviewer: openai
 arbitrator: gemini
-openaiModel: gpt-4o
-geminiModel: gemini-2.0-flash
+openaiModel: gpt-4.1
+geminiModel: gemini-2.5-flash
 grokModel: grok-3
 created: 2024-01-15T10:30:00.000Z
 lastRun: 2024-01-15T14:45:00.000Z
@@ -1087,8 +1089,8 @@ Add any guidance or notes for Claude here...
 - **Language**: fullstack
 - **Reviewer**: openai
 - **Arbitrator**: gemini
-- **OpenAI Model**: gpt-4o
-- **Gemini Model**: gemini-2.0-flash
+- **OpenAI Model**: gpt-4.1
+- **Gemini Model**: gemini-2.5-flash
 - **Grok Model**: grok-3
 
 ## Session History
@@ -1118,11 +1120,11 @@ consensus:
 # API settings
 apis:
   openai:
-    model: gpt-4o             # Accepts any model name (e.g., gpt-5)
+    model: gpt-4.1            # Accepts any model name (e.g., gpt-5)
     temperature: 0.3
     max_tokens: 4096
   gemini:
-    model: gemini-2.0-flash   # Accepts any model name
+    model: gemini-2.5-flash   # Accepts any model name
     temperature: 0.3
     max_tokens: 4096
   grok:
@@ -1157,8 +1159,8 @@ POPEYE_OPENAI_KEY=sk-...           # OpenAI API key
 # Optional
 POPEYE_GEMINI_KEY=...              # Gemini API key (for arbitration)
 POPEYE_DEFAULT_LANGUAGE=python     # Default output language (python/typescript/fullstack/website/all)
-POPEYE_OPENAI_MODEL=gpt-4o         # OpenAI model
-POPEYE_GEMINI_MODEL=gemini-2.0-flash  # Gemini model
+POPEYE_OPENAI_MODEL=gpt-4.1        # OpenAI model
+POPEYE_GEMINI_MODEL=gemini-2.5-flash  # Gemini model
 POPEYE_CONSENSUS_THRESHOLD=95      # Consensus threshold (0-100)
 POPEYE_MAX_ITERATIONS=10           # Max iterations before escalation
 POPEYE_REVIEWER=openai             # Primary reviewer (openai, gemini, or grok)
@@ -1572,6 +1574,7 @@ src/
 ├── config/               # Configuration
 │   ├── schema.ts         # Zod schemas (uses OutputLanguageSchema for default_language)
 │   ├── defaults.ts       # Default values
+│   ├── popeye-md.ts      # Shared popeye.md config reader (used by CLI commands and interactive)
 │   └── index.ts          # Config loading
 ├── generators/           # Project generators
 │   ├── python.ts         # Python scaffolding
@@ -1614,6 +1617,8 @@ src/
 │   ├── artifact-manager.ts # Artifact creation, storage, versioning
 │   ├── skill-loader.ts   # Role skill prompt loading from skills/ directory
 │   ├── repo-snapshot.ts  # Repo snapshot generation and diffing
+│   ├── bridges/          # Pipeline integration bridges
+│   │   └── review-bridge.ts  # /review -> pipeline AUDIT integration (severity/category/CR mapping)
 │   ├── consensus/        # Consensus runner for pipeline phases
 │   ├── phases/           # Phase handlers (intake, review, audit, recovery, etc.)
 │   ├── type-defs/        # Pipeline type definitions (state, enums, artifacts, packets)
@@ -1701,6 +1706,30 @@ CR Lifecycle: `proposed` (created by REVIEW/AUDIT) -> `approved` (routed by orch
 #### Recovery and RCA Rewind
 
 When any gate fails, the pipeline enters RECOVERY_LOOP. After successful recovery, the orchestrator reads the latest RCA artifact from disk and checks for a `requires_phase_rewind_to` field. If present, the pipeline rewinds to that specific phase instead of retesting the originally failed phase. This allows root-cause-aware recovery (e.g., an implementation failure caused by an architecture gap can rewind to ARCHITECTURE).
+
+#### Session Guidance (additionalContext)
+
+The pipeline supports threading user-provided context through all phases via `sessionGuidance`. When `additionalContext` is passed to the orchestrator (e.g., from `/upgrade` context or user steering):
+
+- **INTAKE**: Guidance is prepended to the plan input and stored as an `additional_context` artifact
+- **IMPLEMENTATION**: Guidance is merged with the role prompt in the system prompt
+- **RECOVERY_LOOP**: Guidance is included in the RCA prompt to inform root cause analysis
+
+This ensures that user intent and upgrade context survive across all pipeline phases without manual re-injection.
+
+#### Pipeline Entry Point
+
+New projects can bootstrap directly into the pipeline from `runWorkflow()`. When `loadProject()` fails (no existing state), the workflow creates project state via `createProject()` and runs the pipeline from INTAKE. Existing projects with pipeline state resume from their last checkpoint. CLI commands (`create`, `resume`) load the full consensus configuration from `popeye.md` (reviewer, arbitrator, and all model selections) via the shared `readPopeyeMdConfig()` reader.
+
+#### Review Bridge
+
+The Review Bridge (`src/pipeline/bridges/review-bridge.ts`) connects the `/review` slash command to the pipeline's artifact and Change Request system. When a project is pipeline-managed:
+
+- The bridge detects pipeline state via `isPipelineManaged()` and `extractPipelineState()`
+- Audit findings are converted from workflow format to pipeline format with severity mapping (critical to P0, major to P1, minor to P2, info to P3)
+- Finding categories are mapped to pipeline categories and then to CR change types for routing
+- The bridge runs the full audit flow: snapshot, scan, analyze, convert findings, create artifacts, create CRs, and persist
+- No milestone injection occurs; instead, Change Requests route through the pipeline consensus system
 
 ## Development
 

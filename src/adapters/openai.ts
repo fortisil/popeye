@@ -322,7 +322,7 @@ Be specific and actionable. The specification should be detailed enough that a d
   }
 
   const completion = await client.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-4.1',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: 4096,
@@ -360,7 +360,7 @@ Provide:
 Format your score as: CONSENSUS: [X]%`;
 
   const completion = await client.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-4.1',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.3,
     max_tokens: 2048,
