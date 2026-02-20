@@ -198,6 +198,8 @@ export function generateAllDockerCompose(projectName: string): string {
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - ./apps/backend/.env
     environment:
       - DEBUG=false
       - FRONTEND_URL=http://frontend:80

@@ -150,6 +150,8 @@ export function generateAllDockerComposeWithDb(projectName: string): string {
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+    env_file:
+      - ./apps/backend/.env
     environment:
       - DEBUG=false
       - FRONTEND_URL=http://frontend:80
@@ -211,5 +213,13 @@ DB_VECTOR_REQUIRED=true
 
 # Admin Wizard
 ADMIN_SETUP_TOKEN=change-me-to-a-random-string
+
+# JWT Configuration
+SECRET_KEY=change-me-in-production
+
+# Google OAuth2 (optional - uncomment to enable)
+# GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+# GOOGLE_CLIENT_SECRET=your-client-secret
+# GOOGLE_REDIRECT_URI=http://localhost:8000/api/v1/auth/google/callback
 `;
 }

@@ -231,6 +231,32 @@ popeye-cli audit ./my-project --target frontend
 
 ---
 
+### `popeye-cli debug [projectDir]`
+
+Start an interactive debugging session for a Popeye-generated project. Indexes the project, loads anchor docs (CLAUDE.md, README, config files), then opens a debug sub-REPL where you paste errors for AI-assisted diagnosis and fixes.
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-l, --language <lang>` | Project language/type | `backend` |
+
+```bash
+popeye-cli debug ./my-project
+popeye-cli debug ./my-project --language fullstack
+```
+
+**How it works:**
+1. Scans the project directory and builds a lightweight file index (paths + metadata)
+2. Loads anchor documents: CLAUDE.md, README, package.json, docker-compose.yml, etc.
+3. Opens a `debug >` sub-REPL -- paste an error or describe a bug
+4. Extracts file paths from stack traces and detects tech context (alembic, vite, fastapi, etc.)
+5. Loads only the relevant source files on-demand (not the entire codebase)
+6. Sends targeted context to Claude for structured diagnosis
+7. Claude responds with: Diagnosis, Evidence, Proposed Fix, Commands to Verify, Ready to Apply
+
+**Permission model:** Same as Claude Code -- asks before making any file edits (no auto-write).
+
+---
+
 ## Interactive Mode Slash Commands
 
 Enter these commands during an interactive session (started via `popeye-cli interactive`).
@@ -316,6 +342,41 @@ Available upgrade paths depend on the current project type:
 | `/db apply` | Apply database setup (redirects to CLI) |
 | `/doctor` | Run all readiness checks inline |
 | `/review`, `/audit` | Run a post-build audit with findings and optional recovery |
+
+### Debugging
+
+| Command | Description |
+|---------|-------------|
+| `/debug`, `/dbg` | Start interactive debugging session (requires active project) |
+
+Once inside the debug session, the following sub-commands are available:
+
+| Debug Sub-Command | Description |
+|-------------------|-------------|
+| `/back`, `/done` | Return to main Popeye session |
+| `/clear` | Reset conversation history |
+| `/context` | Re-display project summary |
+| `/fix` | Apply last proposed fix via Popeye execution pipeline |
+
+**Debug session input:** Single Enter submits for commands and short messages. Multi-line paste is auto-detected and waits for the full paste to arrive before submitting.
+
+```
+# Start a debug session from the Popeye REPL
+/debug
+
+# Inside debug session, paste an error:
+debug > Traceback (most recent call last):
+  ...   File "/app/src/database/connection.py", line 15
+  ...   ConnectionRefusedError: [Errno 111] Connection refused
+  ...
+  ... (paste auto-detected, submits after 2s pause)
+
+# Apply the proposed fix
+debug > /fix
+
+# Return to main Popeye REPL (use /back, not /exit which would exit Popeye)
+debug > /back
+```
 
 ### Session Control
 
@@ -434,6 +495,10 @@ popeye-cli resume ./taskmaster
 # Audit the project after build
 popeye-cli review ./taskmaster
 popeye-cli review ./taskmaster --depth 3 --strict
+
+# Debug a project (paste errors, get AI-assisted fixes)
+popeye-cli debug ./taskmaster
+popeye-cli debug ./taskmaster --language fullstack
 
 # Reset and re-plan
 popeye-cli reset ./taskmaster --phase plan

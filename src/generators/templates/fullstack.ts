@@ -495,15 +495,19 @@ DATABASE_URL=sqlite:///./data/app.db
 
 /**
  * Generate UI spec placeholder for fullstack project
+ *
+ * @param projectName - The project name
+ * @param brandColor - Optional brand primary color hex (e.g. '#2563EB')
  */
-export function generateUiSpec(projectName: string): string {
+export function generateUiSpec(projectName: string, brandColor?: string): string {
+  const primary = brandColor || '#3B82F6';
   return JSON.stringify(
     {
       name: projectName,
       version: '1.0',
       theme: {
         colors: {
-          primary: '#3B82F6',
+          primary,
           secondary: '#6B7280',
           accent: '#10B981',
         },

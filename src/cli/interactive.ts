@@ -847,6 +847,7 @@ function showHelp(): void {
     ['/db [action]', 'Database management (status/configure/apply)'],
     ['/doctor', 'Run database and project readiness checks'],
     ['/review', 'Run post-build audit/review with findings and recovery'],
+    ['/debug', 'Start interactive debugging session (use /back to return)'],
     ['/clear', 'Clear screen'],
     ['/exit', 'Exit Popeye'],
   ];
@@ -1028,6 +1029,11 @@ async function handleInput(input: string, state: SessionState): Promise<boolean>
         await handleReviewSlashCommand(state, args);
         break;
 
+      case '/debug':
+      case '/dbg':
+        await handleDebugSlashCommand(state);
+        break;
+
       default:
         printError(`Unknown command: ${cmd}`);
         printInfo('Type /help for available commands');
@@ -1205,6 +1211,27 @@ async function handleReviewSlashCommand(state: SessionState, args: string[] = []
     await runReview(state.projectDir, options);
   } catch (err) {
     printError(err instanceof Error ? err.message : 'Audit failed');
+  }
+}
+
+/**
+ * Handle /debug slash command - start interactive debugging session
+ */
+async function handleDebugSlashCommand(state: SessionState): Promise<void> {
+  if (!state.projectDir) {
+    printError('No active project. Create or resume a project first.');
+    return;
+  }
+
+  try {
+    const { runDebugSession } = await import('./commands/debug.js');
+    await runDebugSession({
+      projectDir: state.projectDir,
+      language: state.language,
+    });
+    printInfo('Returned to main Popeye session.');
+  } catch (err) {
+    printError(err instanceof Error ? err.message : 'Debug session failed');
   }
 }
 
