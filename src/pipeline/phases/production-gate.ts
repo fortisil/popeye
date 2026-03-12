@@ -4,10 +4,22 @@
  * v1.1: Adds start check and env check.
  */
 
+import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+
 import type { PhaseContext, PhaseResult } from './phase-context.js';
 import { successResult, failureResult, triggerJournalist } from './phase-context.js';
 import { resolveCommands } from '../command-resolver.js';
-import { runAllChecks, runPlaceholderScan, runStartCheck, runEnvCheck, storeCheckResults } from '../check-runner.js';
+import {
+  runAllChecks,
+  runPlaceholderScan,
+  runStartCheck,
+  runEnvCheck,
+  runCheck,
+  storeCheckResults,
+  shouldSkipInstall,
+  writeInstallMarker,
+} from '../check-runner.js';
 import { generateRepoSnapshot } from '../repo-snapshot.js';
 
 export async function runProductionGate(context: PhaseContext): Promise<PhaseResult> {
@@ -19,6 +31,25 @@ export async function runProductionGate(context: PhaseContext): Promise<PhaseRes
     const snapshot = await generateRepoSnapshot(projectDir);
     const commands = resolveCommands(snapshot);
     pipeline.resolvedCommands = commands;
+
+    // 1.5. Install dependencies if needed (skips if unchanged since QA_VALIDATION)
+    if (commands.install) {
+      const installCwd = commands.install_cwd
+        ? join(projectDir, commands.install_cwd)
+        : projectDir;
+      const skipInstall = shouldSkipInstall(projectDir, snapshot);
+      if (!skipInstall) {
+        const installResult = await runCheck('install', commands.install, installCwd);
+        if (installResult.status === 'fail') {
+          const stored = storeCheckResults([installResult], artifactManager, 'PRODUCTION_GATE');
+          artifacts.push(...stored);
+          pipeline.artifacts.push(...artifacts);
+          pipeline.gateChecks['PRODUCTION_GATE'] = [installResult];
+          return failureResult('PRODUCTION_GATE', 'Dependency installation failed', installResult.stderr_summary ?? '');
+        }
+        writeInstallMarker(projectDir, snapshot);
+      }
+    }
 
     // 2. Run all checks
     const checkResults = await runAllChecks(commands, projectDir);
@@ -52,7 +83,14 @@ export async function runProductionGate(context: PhaseContext): Promise<PhaseRes
     );
     const hasPlaceholders = placeholderResult.status === 'fail';
     const auditPassed = pipeline.artifacts.some((a) => a.type === 'audit_report');
-    const passed = failedChecks.length === 0 && auditPassed;
+
+    // Detect website projects — placeholder_scan blocks for these
+    const isWebsiteProject =
+      existsSync(join(projectDir, 'next.config.mjs')) ||
+      existsSync(join(projectDir, 'next.config.js')) ||
+      existsSync(join(projectDir, 'src', 'app', 'layout.tsx'));
+    const placeholderBlocking = hasPlaceholders && isWebsiteProject;
+    const passed = failedChecks.length === 0 && auditPassed && !placeholderBlocking;
 
     // 9. Create production readiness report
     const report = [
@@ -77,7 +115,7 @@ export async function runProductionGate(context: PhaseContext): Promise<PhaseRes
       `- Env: ${findCheckStatus(checkResults, 'env_check')}`,
       `- Start: ${findCheckStatus(checkResults, 'start')}`,
       `- Audit: ${auditPassed ? 'PASS' : 'MISSING'}`,
-      `- Placeholders: ${hasPlaceholders ? 'WARNING' : 'CLEAN'}`,
+      `- Placeholders: ${hasPlaceholders ? (placeholderBlocking ? 'FAIL (blocking for website)' : 'WARNING') : 'CLEAN'}`,
     ].join('\n');
 
     const reportEntry = artifactManager.createAndStoreText(

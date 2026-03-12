@@ -192,4 +192,38 @@ describe('GateEngine', () => {
       expect(engine.getPhaseIndex('RECOVERY_LOOP')).toBe(-1); // Not in linear sequence
     });
   });
+
+  // ─── v2.4.6: findLast for stale check results ─────────
+
+  describe('v2.4.6: uses latest check result (findLast)', () => {
+    it('should use the latest check result when multiple exist for same check_type', () => {
+      const pipeline = createDefaultPipelineState();
+      pipeline.artifacts.push(makeArtifact('qa_validation', 'QA_VALIDATION'));
+
+      // First check failed, second check passed (accumulated on retry)
+      pipeline.gateChecks['QA_VALIDATION'] = [
+        {
+          check_type: 'test',
+          status: 'fail',
+          command: 'npm test',
+          exit_code: 1,
+          duration_ms: 500,
+          stderr_summary: 'Error: test failed',
+          timestamp: '2024-01-01T00:00:00Z',
+        },
+        {
+          check_type: 'test',
+          status: 'pass',
+          command: 'npm test',
+          exit_code: 0,
+          duration_ms: 800,
+          timestamp: '2024-01-01T00:01:00Z',
+        },
+      ];
+
+      const result = engine.evaluateGate('QA_VALIDATION', pipeline);
+      expect(result.pass).toBe(true);
+      expect(result.failedChecks).toHaveLength(0);
+    });
+  });
 });

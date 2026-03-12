@@ -9,7 +9,7 @@ import path from 'node:path';
 import type { ProjectState } from '../types/workflow.js';
 import type { OutputLanguage } from '../types/project.js';
 import { isWorkspace } from '../types/project.js';
-import { buildWebsiteContext, resolveBrandAssets, validateWebsiteContext } from '../generators/website-context.js';
+import { buildWebsiteContext, resolveBrandAssets, validateWebsiteContext, extractDocPathsFromText } from '../generators/website-context.js';
 import { resolveWorkspaceRoot } from '../generators/workspace-root.js';
 import { generateWebsiteLandingPage } from '../generators/templates/website-landing.js';
 import { generateWebsitePricingPage } from '../generators/templates/website-pricing.js';
@@ -52,10 +52,12 @@ export async function updateWebsiteContent(
 
   // Build content context from user docs and specification
   const parentDir = path.dirname(projectDir);
+  const extraDocPaths = state.idea ? extractDocPathsFromText(state.idea) : [];
   const context = await buildWebsiteContext(
     parentDir,
     state.name,
-    state.specification
+    state.specification,
+    extraDocPaths,
   );
 
   // Apply brand context from state if available

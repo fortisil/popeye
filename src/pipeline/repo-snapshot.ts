@@ -37,6 +37,8 @@ const CONFIG_FILES = new Set([
   'prisma/schema.prisma', 'alembic.ini',
   'requirements.txt', 'setup.py', 'setup.cfg',
   'Makefile', 'Procfile',
+  'poetry.lock', 'package-lock.json', 'pnpm-lock.yaml',
+  'yarn.lock', 'pnpm-workspace.yaml',
 ]);
 
 const CODE_EXTENSIONS = new Set([
@@ -223,6 +225,7 @@ function extractKeyFields(configName: string, content: string): Record<string, u
         scripts: pkg.scripts,
         dependencies: pkg.dependencies ? Object.keys(pkg.dependencies) : [],
         devDependencies: pkg.devDependencies ? Object.keys(pkg.devDependencies) : [],
+        workspaces: pkg.workspaces,
       };
     }
 

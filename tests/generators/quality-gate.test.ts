@@ -75,7 +75,7 @@ describe('validateWebsiteContextOrThrow', () => {
   });
 
   it('still throws when passed is false from validateWebsiteContext', () => {
-    // Context with multiple blocking issues
+    // Context with multiple blocking issues (strategy absence is not a factor)
     const context = makeContext({
       productName: 'my-app',
       rawDocs: '',
@@ -86,6 +86,13 @@ describe('validateWebsiteContextOrThrow', () => {
     expect(() => validateWebsiteContextOrThrow(context, 'my-app')).toThrow(
       /Website generation blocked/
     );
+  });
+
+  it('does not throw on missing strategy alone', () => {
+    // Strategy absence should never cause validation failure
+    const context = makeContext({ strategy: undefined });
+
+    expect(() => validateWebsiteContextOrThrow(context, 'gateco')).not.toThrow();
   });
 });
 
@@ -168,7 +175,7 @@ describe('validateWebsiteContext (soft mode)', () => {
     expect(result.warnings.some((w) => /description/i.test(w))).toBe(true);
   });
 
-  it('clamps score to 0 when everything is wrong', () => {
+  it('clamps score to floor when everything is wrong', () => {
     const context: WebsiteContentContext = {
       productName: 'my-app',
       features: [],
@@ -177,7 +184,16 @@ describe('validateWebsiteContext (soft mode)', () => {
     };
     const result = validateWebsiteContext(context, 'my-app');
 
-    expect(result.contentScore).toBe(0);
+    // Score is low but no longer 0 since strategy penalty (-15) was removed
+    expect(result.contentScore).toBeLessThanOrEqual(15);
     expect(result.passed).toBe(false);
+  });
+
+  it('does not emit strategy-related issues when strategy is undefined', () => {
+    const context = makeContext({ strategy: undefined });
+    const result = validateWebsiteContext(context, 'gateco');
+
+    // Strategy absence should not produce any issues or warnings about strategy
+    expect(result.issues.some((i) => /strategy/i.test(i))).toBe(false);
   });
 });

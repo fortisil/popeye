@@ -17,9 +17,16 @@ import {
 } from './doc-parser.js';
 import { getScanDirectories } from './workspace-root.js';
 import type { WebsiteStrategyDocument, BrandAssetsContract } from '../types/website-strategy.js';
+import { generateMissingWebsiteContent } from './website-content-ai.js';
 
 /** Per-file character cap to prevent a single large doc from consuming the budget */
 const PER_FILE_CAP = 8000;
+
+/** Allowed extensions for user-provided doc paths */
+const ALLOWED_DOC_EXTENSIONS = ['.md', '.mdx', '.txt'];
+
+/** Maximum file size for user-provided docs (2MB) */
+const MAX_DOC_SIZE = 2 * 1024 * 1024;
 
 /**
  * Structured content context for website generation
@@ -48,6 +55,15 @@ export interface WebsiteContentContext {
   strategy?: WebsiteStrategyDocument;
   /** Resolved brand assets contract for deterministic logo/favicon placement */
   brandAssets?: BrandAssetsContract;
+  /** Diagnostics for pricing extraction pipeline */
+  pricingDiagnostics?: {
+    charsScanned: number;
+    foundPricingHeader: boolean;
+    extractionMethod: 'known_plan_names' | 'table_fallback' | 'ai' | 'none';
+    extractedTiers?: Array<{ name: string; price: string }>;
+    reasonIfEmpty?: string;
+    source: 'docs' | 'ai' | 'default' | 'none';
+  };
 }
 
 /**
@@ -280,19 +296,103 @@ export async function readProjectDocs(
 }
 
 /**
+ * Extract absolute file paths from user-provided text (idea/specification).
+ * Supports:
+ * - Unix paths: '/path/to/file.md'
+ * - Windows paths: "C:\Users\me\file.md"
+ * - Paths with spaces: '/Users/me/My Docs/pricing.md'
+ * - Extensions: .md, .mdx, .txt
+ *
+ * @param text - User-provided idea or specification text
+ * @returns Array of absolute file paths found in the text
+ */
+export function extractDocPathsFromText(text: string): string[] {
+  const paths: string[] = [];
+
+  // 1. Quoted paths (most reliable — handles spaces, cross-platform)
+  const quotedPattern = /['"]([A-Za-z]:[\\\/].+?\.(?:md|mdx|txt)|\/[^'"]+\.(?:md|mdx|txt))['"]/gi;
+  let match;
+  while ((match = quotedPattern.exec(text)) !== null) {
+    paths.push(match[1]);
+  }
+
+  // 2. Unquoted Unix absolute paths (no spaces — spaces break word boundaries)
+  const unquotedUnix = /(?:^|\s)(\/\S+\.(?:md|mdx|txt))(?=[\s,;)]|$)/gm;
+  while ((match = unquotedUnix.exec(text)) !== null) {
+    if (!paths.includes(match[1])) paths.push(match[1]);
+  }
+
+  // 3. Unquoted Windows paths (drive letter)
+  const unquotedWin = /(?:^|\s)([A-Za-z]:[\\\/]\S+\.(?:md|mdx|txt))(?=[\s,;)]|$)/gm;
+  while ((match = unquotedWin.exec(text)) !== null) {
+    if (!paths.includes(match[1])) paths.push(match[1]);
+  }
+
+  return [...new Set(paths)];
+}
+
+/**
+ * Validate and filter doc paths for safe ingestion.
+ * Checks: isAbsolute, file exists, size < 2MB, extension allowed.
+ *
+ * @param paths - Array of absolute paths to validate
+ * @returns Array of valid, readable paths
+ */
+export async function validateAndFilterDocPaths(paths: string[]): Promise<string[]> {
+  const valid: string[] = [];
+  for (const p of paths) {
+    const ext = path.extname(p).toLowerCase();
+    if (!ALLOWED_DOC_EXTENSIONS.includes(ext)) {
+      console.log(`[doc-ingest] Skipped: ${p} (unsupported format ${ext})`);
+      continue;
+    }
+    const isAbs = path.isAbsolute(p) || /^[A-Za-z]:[\\\/]/.test(p);
+    if (!isAbs) continue;
+    try {
+      const stat = await fs.stat(p);
+      if (stat.size > MAX_DOC_SIZE) {
+        console.log(`[doc-ingest] Skipped: ${p} (${(stat.size / 1024).toFixed(0)}KB exceeds 2MB limit)`);
+        continue;
+      }
+      console.log(`[doc-ingest] Read: ${p} (${(stat.size / 1024).toFixed(1)}KB)`);
+      valid.push(p);
+    } catch {
+      console.log(`[doc-ingest] Skipped: ${p} (file not found)`);
+    }
+  }
+  return valid;
+}
+
+/**
  * Build a structured website content context from discovered docs
  *
  * @param cwd - Working directory to scan for docs
  * @param projectName - The project name (folder name fallback)
  * @param specification - Optional expanded specification text
+ * @param extraDocPaths - Optional extra doc paths extracted from user idea text
  * @returns Structured content context for website templates
  */
 export async function buildWebsiteContext(
   cwd: string,
   projectName: string,
-  specification?: string
+  specification?: string,
+  extraDocPaths?: string[],
 ): Promise<WebsiteContentContext> {
   const docPaths = await discoverProjectDocs(cwd);
+
+  // Merge validated extra doc paths (from idea text)
+  if (extraDocPaths?.length) {
+    const validPaths = await validateAndFilterDocPaths(extraDocPaths);
+    const seen = new Set(docPaths.map((p) => path.resolve(p)));
+    for (const p of validPaths) {
+      const resolved = path.resolve(p);
+      if (!seen.has(resolved)) {
+        docPaths.push(resolved);
+        seen.add(resolved);
+      }
+    }
+  }
+
   const rawDocs = docPaths.length > 0 ? await readProjectDocs(docPaths) : '';
   const brandAssets = await findBrandAssets(cwd);
 
@@ -307,7 +407,20 @@ export async function buildWebsiteContext(
 
   context.tagline = extractTagline(cleanDocs, context.productName);
   context.description = extractDescription(cleanDocs, specification);
-  context.pricing = extractPricing(cleanDocs);
+
+  // Extract pricing with provenance tracking
+  const pricingResult = extractPricing(cleanDocs);
+  context.pricing = pricingResult.tiers.length > 0 ? pricingResult.tiers : undefined;
+  context.pricingDiagnostics = {
+    charsScanned: cleanDocs.length,
+    foundPricingHeader: !!cleanDocs.match(/##\s+(?:[\d.]*\s*)?Pricing\b/i),
+    extractionMethod: pricingResult.evidence?.extractionMethod ?? 'none',
+    extractedTiers: pricingResult.tiers.map((t) => ({ name: t.name, price: t.price })),
+    reasonIfEmpty: pricingResult.tiers.length === 0
+      ? 'No pricing table rows matched in docs'
+      : undefined,
+    source: pricingResult.source,
+  };
 
   // Extract brand info
   if (brandAssets.logoPath) {
@@ -317,6 +430,36 @@ export async function buildWebsiteContext(
   const primaryColor = extractPrimaryColor(cleanDocs);
   if (primaryColor) {
     context.brand = { ...context.brand, primaryColor };
+  }
+
+  // v2.2.2: Per-field AI content generation fallback
+  // Reason: triggers when ANY field is missing (not all-or-nothing), but only fills missing fields
+  const pricingMissing = context.pricing == null || context.pricing.length === 0;
+  const hasMissingContent = !context.tagline || !context.description || context.features.length === 0 || pricingMissing;
+  if (hasMissingContent && (rawDocs.length > 50 || specification)) {
+    try {
+      const aiContent = await generateMissingWebsiteContent(
+        context.productName,
+        specification ?? '',
+        rawDocs,
+      );
+      // Only fill fields that are actually missing (don't overwrite extracted truth)
+      if (!context.tagline && aiContent.tagline) context.tagline = aiContent.tagline;
+      if (!context.description && aiContent.description) context.description = aiContent.description;
+      if (context.features.length === 0 && aiContent.features?.length) context.features = aiContent.features;
+      if (pricingMissing && aiContent.pricing?.length) {
+        context.pricing = aiContent.pricing;
+        context.pricingDiagnostics = {
+          ...context.pricingDiagnostics!,
+          extractionMethod: 'ai',
+          source: 'ai',
+          extractedTiers: aiContent.pricing.map((t) => ({ name: t.name, price: t.price })),
+          reasonIfEmpty: undefined,
+        };
+      }
+    } catch {
+      // Non-blocking: continue with doc-parser results
+    }
   }
 
   return context;
@@ -388,14 +531,6 @@ export function validateWebsiteContext(
     contentScore -= 20;
   }
 
-  // Strategy validation
-  if (!context.strategy) {
-    issues.push(
-      'Website strategy missing. Strategy generation may have failed or been skipped.'
-    );
-    contentScore -= 15;
-  }
-
   // Brand color validation: brand/color docs exist but no color extracted
   if (!context.brand?.primaryColor && context.rawDocs && /color|brand/i.test(context.rawDocs)) {
     issues.push(
@@ -421,8 +556,12 @@ export function validateWebsiteContext(
     const nameMatches = tierNames.filter((n) => DEFAULT_PRICING_NAMES.includes(n));
     const priceMatches = tierPrices.filter((p) => DEFAULT_PRICING_AMOUNTS.includes(p));
 
-    // Reason: if most tier names AND prices match defaults, it's likely placeholder content
-    if (nameMatches.length >= 2 && priceMatches.length >= 2) {
+    // Reason: only warn when pricing did NOT come from docs or AI (provenance-based check)
+    const pricingSource = context.pricingDiagnostics?.source;
+    if (
+      nameMatches.length >= 2 && priceMatches.length >= 2
+      && pricingSource !== 'docs' && pricingSource !== 'ai'
+    ) {
       warnings.push(
         'Pricing tiers appear to use default values (Starter/Pro/Enterprise at $0/$29/Custom). ' +
         'Add a pricing section to your docs for accurate tiers.'

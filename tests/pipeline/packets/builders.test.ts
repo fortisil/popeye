@@ -100,13 +100,17 @@ describe('PacketBuilders', () => {
   });
 
   describe('buildConsensusPacket', () => {
-    it('should auto-compute APPROVED when all approve', () => {
+    it('should auto-compute APPROVED when all approve with high confidence', () => {
       const packet = buildConsensusPacket({
         planPacketRef: makeRef(),
-        votes: [makeVote('APPROVE', 'r1'), makeVote('APPROVE', 'r2')],
+        votes: [
+          { ...makeVote('APPROVE', 'r1'), confidence: 0.96 },
+          { ...makeVote('APPROVE', 'r2'), confidence: 0.97 },
+        ],
         rules: { threshold: 0.95, quorum: 2, min_reviewers: 2 },
       });
 
+      // Option B: (1.0*0.96 + 1.0*0.97)/2 = 0.965 >= 0.95
       expect(packet.consensus_result.approved).toBe(true);
       expect(packet.consensus_result.score).toBe(1.0);
       expect(packet.consensus_result.participating_reviewers).toBe(2);
@@ -169,18 +173,37 @@ describe('PacketBuilders', () => {
 
       expect(packet.consensus_result.weighted_score).toBeDefined();
       expect(typeof packet.consensus_result.weighted_score).toBe('number');
-      expect(packet.consensus_result.weighted_score).toBe(1.0);
+      // Option B: (1.0*0.9 + 1.0*0.9)/2 = 0.9
+      expect(packet.consensus_result.weighted_score).toBeCloseTo(0.9, 3);
     });
 
-    it('should have weighted_score < 1 for mixed votes (v1.1)', () => {
+    it('should have weighted_score < 1 for mixed votes (v1.1, v2.4.2 honest scoring)', () => {
       const packet = buildConsensusPacket({
         planPacketRef: makeRef(),
         votes: [makeVote('APPROVE', 'r1'), makeVote('REJECT', 'r2')],
         rules: { threshold: 0.5, quorum: 1, min_reviewers: 1 },
       });
 
-      // weighted_score should be 0 since REJECT vote has blocking_issues
-      expect(packet.consensus_result.weighted_score).toBe(0);
+      // v2.4.2: honest score — REJECT has blocking_issues but score is not force-zeroed
+      // Option B: (1.0*0.9 + 0.0*0.9) / 2 = 0.45
+      expect(packet.consensus_result.weighted_score).toBeCloseTo(0.45, 3);
+      expect(packet.consensus_result.has_true_blockers).toBe(true);
+    });
+
+    it('consensus_result includes has_true_blockers field (v2.4.2)', () => {
+      const packet = buildConsensusPacket({
+        planPacketRef: makeRef(),
+        votes: [makeVote('APPROVE', 'r1'), makeVote('APPROVE', 'r2')],
+        rules: { threshold: 0.5, quorum: 1, min_reviewers: 1 },
+      });
+      expect(packet.consensus_result.has_true_blockers).toBe(false);
+
+      const packetWithBlockers = buildConsensusPacket({
+        planPacketRef: makeRef(),
+        votes: [makeVote('APPROVE', 'r1'), makeVote('REJECT', 'r2')],
+        rules: { threshold: 0.5, quorum: 1, min_reviewers: 1 },
+      });
+      expect(packetWithBlockers.consensus_result.has_true_blockers).toBe(true);
     });
 
     it('should link to plan packet', () => {

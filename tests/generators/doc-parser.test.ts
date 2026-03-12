@@ -104,18 +104,97 @@ describe('isSuspiciousProductName', () => {
 });
 
 describe('extractPricing', () => {
-  it('extracts pricing tiers from markdown table', () => {
+  it('extracts pricing tiers from markdown table with provenance', () => {
     const docs = `## Pricing\n| Plan | Price |\n|---|---|\n| Free | Free |\n| Pro | $99/month minimum |\n| Enterprise | Custom pricing |`;
-    const tiers = extractPricing(docs);
-    expect(tiers).toBeDefined();
-    expect(tiers!.length).toBe(3);
-    expect(tiers![0].name).toContain('Free');
-    expect(tiers![1].price).toBe('$99');
-    expect(tiers![2].price).toBe('Custom');
+    const result = extractPricing(docs);
+    expect(result.source).toBe('docs');
+    expect(result.tiers.length).toBe(3);
+    expect(result.tiers[0].name).toContain('Free');
+    expect(result.tiers[1].price).toBe('$99');
+    expect(result.tiers[2].price).toBe('Custom');
+    expect(result.evidence).toBeDefined();
+    expect(result.evidence!.extractionMethod).toBe('known_plan_names');
+    expect(result.evidence!.matchedRows).toBe(3);
   });
 
-  it('returns undefined when no pricing found', () => {
+  it('returns source none when no pricing found', () => {
     const docs = '# Product\nJust a product.';
-    expect(extractPricing(docs)).toBeUndefined();
+    const result = extractPricing(docs);
+    expect(result.source).toBe('none');
+    expect(result.tiers).toEqual([]);
+    expect(result.evidence).toBeUndefined();
+  });
+
+  it('extracts Gateco-style pricing with emoji-prefixed rows and <br> tags', () => {
+    const docs = [
+      '## Pricing Overview',
+      '| Plan | Price | Users |',
+      '|---|---|---|',
+      '| Free | Free | Up to 5 |',
+      '| Pro | $99/month<br>minimum | Unlimited |',
+      '| Enterprise | Custom | Unlimited |',
+    ].join('\n');
+    const result = extractPricing(docs);
+    expect(result.source).toBe('docs');
+    expect(result.tiers.length).toBe(3);
+    expect(result.tiers[0].name).toBe('Free');
+    expect(result.tiers[0].price).toBe('Free');
+    expect(result.tiers[1].name).toBe('Pro');
+    expect(result.tiers[1].price).toBe('$99');
+    expect(result.tiers[2].name).toBe('Enterprise');
+    expect(result.tiers[2].price).toBe('Custom');
+  });
+
+  it('falls back to table_fallback for nonstandard plan names', () => {
+    const docs = [
+      '## Pricing',
+      '| Plan | Price |',
+      '|---|---|',
+      '| Hobby | Free |',
+      '| Scale | $49/mo |',
+      '| Organization | Custom |',
+    ].join('\n');
+    const result = extractPricing(docs);
+    expect(result.source).toBe('docs');
+    expect(result.tiers.length).toBe(3);
+    expect(result.evidence!.extractionMethod).toBe('table_fallback');
+    expect(result.tiers[0].name).toBe('Hobby');
+    expect(result.tiers[1].name).toBe('Scale');
+    expect(result.tiers[2].name).toBe('Organization');
+  });
+
+  it('detects price in 3rd column via header scan', () => {
+    const docs = [
+      '## Pricing',
+      '| Plan | Features | Price |',
+      '|---|---|---|',
+      '| Hobby | 5 projects | Free |',
+      '| Scale | Unlimited | $49/mo |',
+    ].join('\n');
+    const result = extractPricing(docs);
+    expect(result.source).toBe('docs');
+    expect(result.tiers.length).toBe(2);
+    expect(result.tiers[0].price).toBe('Free');
+    expect(result.tiers[1].price).toBe('$49');
+  });
+
+  it('skips separator rows and header-like rows in fallback', () => {
+    const docs = [
+      '## Pricing',
+      '| Plan | Price |',
+      '|---|---|',
+      '| Plan | $10 |',  // header-like row, should skip
+      '| Hobby | Free |',
+    ].join('\n');
+    const result = extractPricing(docs);
+    // "Plan" row should be skipped by the /^(Plan|Tier|Name|Feature)/i filter
+    expect(result.tiers.every((t) => t.name !== 'Plan')).toBe(true);
+  });
+
+  it('returns empty tiers for pricing section with no table', () => {
+    const docs = '## Pricing\nContact us for pricing details.';
+    const result = extractPricing(docs);
+    expect(result.source).toBe('none');
+    expect(result.tiers).toEqual([]);
   });
 });

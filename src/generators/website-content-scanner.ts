@@ -76,6 +76,16 @@ const PLACEHOLDER_PATTERNS: Array<{
     message: 'Default pricing amount ($29/mo)',
     severity: 'warning',
   },
+  {
+    pattern: /coming soon/i,
+    message: 'Contains "coming soon" placeholder text',
+    severity: 'error',
+  },
+  {
+    pattern: /placeholder/i,
+    message: 'Contains "placeholder" text',
+    severity: 'error',
+  },
 ];
 
 /**
@@ -156,7 +166,100 @@ function findLineNumber(content: string, pattern: RegExp): number | undefined {
 }
 
 /**
- * Scan generated website files for placeholder fingerprints
+ * Collect all page routes from the src/app directory structure.
+ * A route exists if there is a page.tsx (or page.jsx/page.ts/page.js) in a directory.
+ *
+ * @param appDir - The src/app directory path
+ * @returns Set of route paths (e.g., '/', '/pricing', '/blog')
+ */
+async function collectPageRoutes(appDir: string): Promise<Set<string>> {
+  const routes = new Set<string>();
+
+  async function walk(dir: string, routePrefix: string): Promise<void> {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+
+      // Check if this directory has a page file
+      const hasPage = entries.some(
+        (e) => e.isFile() && /^page\.(tsx|jsx|ts|js)$/.test(e.name)
+      );
+      if (hasPage) {
+        routes.add(routePrefix || '/');
+      }
+
+      // Recurse into subdirectories (skip special dirs)
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (entry.name.startsWith('_') || entry.name === 'api' || SKIP_DIRS.has(entry.name)) continue;
+        await walk(path.join(dir, entry.name), `${routePrefix}/${entry.name}`);
+      }
+    } catch {
+      // Directory not accessible
+    }
+  }
+
+  await walk(appDir, '');
+  return routes;
+}
+
+/**
+ * Scan for internal links that point to pages that do not exist.
+ *
+ * @param websiteDir - The website project directory
+ * @param files - Already-collected source file paths
+ * @returns Array of scan issues for broken internal links
+ */
+async function scanInternalLinks(
+  websiteDir: string,
+  files: string[]
+): Promise<ScanIssue[]> {
+  const issues: ScanIssue[] = [];
+  const appDir = path.join(websiteDir, 'src', 'app');
+
+  // Collect existing page routes
+  const routes = await collectPageRoutes(appDir);
+
+  // Regex to find href="/..." values in source files
+  const hrefPattern = /href=["'](\/([\w-/]*)?)["']/g;
+
+  for (const filePath of files) {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const relativePath = path.relative(websiteDir, filePath);
+
+      let match;
+      while ((match = hrefPattern.exec(content)) !== null) {
+        const href = match[1];
+
+        // Skip anchor links (/#section), API routes, and external/protocol links
+        if (href.startsWith('/#') || href.startsWith('/api/') || href.startsWith('/api')) continue;
+
+        // Normalize: strip trailing slash for comparison
+        const normalizedHref = href === '/' ? '/' : href.replace(/\/$/, '');
+
+        if (!routes.has(normalizedHref)) {
+          const lineNum = content.slice(0, match.index).split('\n').length;
+          issues.push({
+            file: relativePath,
+            message: `Internal link "${href}" points to a page that does not exist`,
+            severity: 'error',
+            line: lineNum,
+          });
+        }
+      }
+
+      // Reset regex lastIndex for next file
+      hrefPattern.lastIndex = 0;
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Scan generated website files for placeholder fingerprints and broken internal links
  *
  * @param websiteDir - The website project directory to scan
  * @returns Scan result with issues and quality score
@@ -198,6 +301,15 @@ export async function scanGeneratedContent(websiteDir: string): Promise<ScanResu
     } catch {
       // Skip unreadable files
     }
+  }
+
+  // Scan for broken internal links
+  try {
+    const linkIssues = await scanInternalLinks(websiteDir, files);
+    issues.push(...linkIssues);
+    score -= linkIssues.length * 15;
+  } catch {
+    // Non-blocking: link scan failures should not stop the overall scan
   }
 
   return {

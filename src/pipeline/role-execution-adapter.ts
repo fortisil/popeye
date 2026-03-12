@@ -16,6 +16,8 @@ import type {
   ArtifactEntry,
 } from './types.js';
 import type { SkillLoader, SkillDefinition } from './skill-loader.js';
+import type { SkillUsageRegistry } from './skills/usage-registry.js';
+import { STRATEGY_ROLES, loadStrategyForRole } from './strategy-context.js';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -65,8 +67,12 @@ export function buildRoleExecutionContext(
   const allowedPaths = extractAllowedPaths(planContent, role);
   const forbiddenPatterns = extractForbiddenPatterns(role);
 
-  // Build system prompt combining skill + role constraints
-  const systemPrompt = buildRoleSystemPrompt(role, skill, planContent, forbiddenPatterns);
+  // Load strategy for roles that need it
+  const strategyBlock = STRATEGY_ROLES.includes(role)
+    ? loadStrategyForRole(projectDir) : undefined;
+
+  // Build system prompt combining skill + role constraints + optional strategy
+  const systemPrompt = buildRoleSystemPrompt(role, skill, planContent, forbiddenPatterns, strategyBlock);
 
   return {
     role,
@@ -114,6 +120,7 @@ export function buildAllRoleContexts(
   pipeline: PipelineState,
   skillLoader: SkillLoader,
   projectDir: string,
+  skillUsageRegistry?: SkillUsageRegistry,
 ): Map<PipelineRole, RoleExecutionContext> {
   const contexts = new Map<PipelineRole, RoleExecutionContext>();
 
@@ -129,8 +136,18 @@ export function buildAllRoleContexts(
     const role = detectRoleFromPlan(content, pipeline.activeRoles);
     if (!role) continue;
 
-    const skill = skillLoader.loadSkill(role);
+    const { definition: skill, meta } = skillLoader.loadSkillWithMeta(role);
     contexts.set(role, buildRoleExecutionContext(role, skill, rolePlan, projectDir));
+
+    // Record skill usage — role skill injected into execution context
+    if (skillUsageRegistry) {
+      skillUsageRegistry.record(role, 'IMPLEMENTATION', 'role_context', meta.source, meta.version);
+
+      // Record strategy context usage for roles that receive it
+      if (STRATEGY_ROLES.includes(role) && loadStrategyForRole(projectDir)) {
+        skillUsageRegistry.record(role, 'IMPLEMENTATION', 'strategy_context', 'disk', '1');
+      }
+    }
   }
 
   return contexts;
@@ -189,6 +206,7 @@ function buildRoleSystemPrompt(
   skill: SkillDefinition,
   planContent: string,
   forbiddenPatterns: string[],
+  strategyContext?: string,
 ): string {
   const lines = [
     `# Role: ${role}`,
@@ -199,9 +217,17 @@ function buildRoleSystemPrompt(
     '## Your Approved Role Plan',
     planContent.slice(0, 4000),
     '',
+  ];
+
+  // Inject strategy after plan, before constraints
+  if (strategyContext) {
+    lines.push('## Website Marketing Strategy', strategyContext, '');
+  }
+
+  lines.push(
     '## Constraints',
     ...skill.constraints.map((c) => `- ${c}`),
-  ];
+  );
 
   if (forbiddenPatterns.length > 0) {
     lines.push(

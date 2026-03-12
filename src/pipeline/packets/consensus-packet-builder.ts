@@ -1,7 +1,9 @@
 /**
  * Consensus Packet Builder — aggregates reviewer votes into a ConsensusPacket.
  * Auto-computes consensus result (score, approval) and final status.
- * v1.1: Added confidence-weighted scoring.
+ * v2.0: Option B scoring — avg(baseWeight * confidence) per reviewer.
+ *       REJECT guard: REJECT with true blockers prevents APPROVED (not ARBITRATED).
+ *       Normalization summary passthrough.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -11,11 +13,19 @@ import type {
   ReviewerVote,
   ConsensusPacket,
 } from '../types.js';
+import { isNoneVariant } from '../../shared/text-utils.js';
 
 export interface ConsensusRules {
   threshold: number;
   quorum: number;
   min_reviewers: number;
+}
+
+export interface NormalizationSummary {
+  tagged_blockers_demoted_to_suggestions: number;
+  tagged_blockers_demoted_to_required: number;
+  untagged_from_blocking_routed_to_required: number;
+  forced_rejects: number;
 }
 
 export interface BuildConsensusPacketArgs {
@@ -27,6 +37,7 @@ export interface BuildConsensusPacketArgs {
     merged_patch?: string;
     artifact_ref?: ArtifactRef;
   };
+  normalizationMoves?: NormalizationSummary;
 }
 
 /** Vote weight mapping: APPROVE=1.0, CONDITIONAL=0.5, REJECT=0.0 */
@@ -40,43 +51,48 @@ const VOTE_WEIGHTS: Record<string, number> = {
  * Compute both simple and confidence-weighted consensus scores.
  *
  * Simple score: approve count / total votes (backward compat).
- * Weighted score: each vote's weight (APPROVE=1, CONDITIONAL=0.5, REJECT=0)
- * multiplied by voter confidence, then averaged by total confidence.
- * If any vote has blocking_issues, weighted_score is forced to 0.
+ * Option B weighted score: average of (vote_weight * confidence) per reviewer.
+ * v2.4.2: Returns honest rawWeighted score + has_true_blockers flag.
+ * Force-zero veto removed — governance guard in buildConsensusPacket() is
+ * the single enforcement point for blocker-based rejection.
  */
 export function computeConsensusScore(
   votes: ReviewerVote[],
-): { score: number; weighted_score: number } {
-  if (votes.length === 0) return { score: 0, weighted_score: 0 };
+): { score: number; weighted_score: number; has_true_blockers: boolean } {
+  if (votes.length === 0) return { score: 0, weighted_score: 0, has_true_blockers: false };
 
   // Simple score (backward compat): approve ratio
   const approvedCount = votes.filter((v) => v.vote === 'APPROVE').length;
   const score = approvedCount / votes.length;
 
-  // Weighted score: confidence-weighted vote values
-  let totalWeight = 0;
+  // Option B scoring: average of (vote_weight * confidence) per reviewer
   let weightedSum = 0;
   for (const v of votes) {
-    const w = v.confidence;
-    weightedSum += (VOTE_WEIGHTS[v.vote] ?? 0) * w;
-    totalWeight += w;
+    const baseWeight = VOTE_WEIGHTS[v.vote] ?? 0;
+    weightedSum += baseWeight * v.confidence;
   }
-  const rawWeighted = totalWeight > 0 ? weightedSum / totalWeight : 0;
+  const rawWeighted = weightedSum / votes.length;
 
-  // Override: any vote with blocking_issues forces weighted_score to 0
-  const hasBlockingIssues = votes.some((v) => v.blocking_issues.length > 0);
+  // v2.4.2: Detect true blockers but don't force score to 0.
+  // Downstream code uses has_true_blockers for decisions instead.
+  const has_true_blockers = votes.some(
+    (v) => v.vote === 'REJECT' && v.blocking_issues.some((issue) => !isNoneVariant(issue)),
+  );
 
   return {
     score,
-    weighted_score: hasBlockingIssues ? 0 : rawWeighted,
+    weighted_score: rawWeighted,
+    has_true_blockers,
   };
 }
 
 export function buildConsensusPacket(args: BuildConsensusPacketArgs): ConsensusPacket {
-  const { planPacketRef, votes, rules, arbitratorResult } = args;
+  const { planPacketRef, votes, rules, arbitratorResult, normalizationMoves } = args;
 
-  const { score, weighted_score } = computeConsensusScore(votes);
-  const approved = score >= rules.threshold && votes.length >= rules.quorum;
+  const { score, weighted_score, has_true_blockers } = computeConsensusScore(votes);
+
+  // Use weighted_score (not simple score) for approval decision
+  const approved = weighted_score >= rules.threshold && votes.length >= rules.quorum;
 
   let finalStatus: 'APPROVED' | 'REJECTED' | 'ARBITRATED';
   if (arbitratorResult) {
@@ -84,6 +100,14 @@ export function buildConsensusPacket(args: BuildConsensusPacketArgs): ConsensusP
   } else if (approved) {
     finalStatus = 'APPROVED';
   } else {
+    finalStatus = 'REJECTED';
+  }
+
+  // Governance guard: REJECT with true blockers prevents APPROVED (but not ARBITRATED)
+  const hasRejectWithTrueBlockers = votes.some(
+    (v) => v.vote === 'REJECT' && v.blocking_issues.some((i) => !isNoneVariant(i)),
+  );
+  if (hasRejectWithTrueBlockers && finalStatus === 'APPROVED') {
     finalStatus = 'REJECTED';
   }
 
@@ -105,8 +129,10 @@ export function buildConsensusPacket(args: BuildConsensusPacketArgs): ConsensusP
       score,
       weighted_score,
       participating_reviewers: votes.length,
+      has_true_blockers,
     },
     arbitrator_result: arbitratorResult,
     final_status: finalStatus,
+    normalization_moves: normalizationMoves,
   };
 }

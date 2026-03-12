@@ -7,6 +7,8 @@ import {
   buildChangeRequest,
   routeChangeRequest,
   formatChangeRequest,
+  computeDriftKey,
+  isDuplicateCR,
 } from '../../src/pipeline/change-request.js';
 import type { ArtifactRef } from '../../src/pipeline/types.js';
 
@@ -176,5 +178,73 @@ describe('formatChangeRequest', () => {
     expect(md).toContain('REVIEWER');
     expect(md).toContain('medium');
     expect(md).toContain('Config files changed');
+  });
+});
+
+// ─── v2.4.9: Drift Key Dedup ─────────────────────────────
+
+describe('computeDriftKey', () => {
+  it('should produce the same key regardless of input order', () => {
+    const key1 = computeDriftKey('config', 'snap-1', ['b.json', 'a.json'], ['b:x->y', 'a:p->q']);
+    const key2 = computeDriftKey('config', 'snap-1', ['a.json', 'b.json'], ['a:p->q', 'b:x->y']);
+    expect(key1).toBe(key2);
+  });
+
+  it('should produce different keys for different baselines', () => {
+    const key1 = computeDriftKey('config', 'snap-1', ['a.json'], ['a:x->y']);
+    const key2 = computeDriftKey('config', 'snap-2', ['a.json'], ['a:x->y']);
+    expect(key1).not.toBe(key2);
+  });
+
+  it('should produce different keys for different change types', () => {
+    const key1 = computeDriftKey('config', 'snap-1', ['a.json'], []);
+    const key2 = computeDriftKey('scope', 'snap-1', ['a.json'], []);
+    expect(key1).not.toBe(key2);
+  });
+
+  it('should return a 32-char hex string', () => {
+    const key = computeDriftKey('config', 'snap-1', ['a.json'], ['a:x->y']);
+    expect(key).toMatch(/^[0-9a-f]{32}$/);
+  });
+});
+
+describe('isDuplicateCR', () => {
+  it('should return false for undefined pendingCRs', () => {
+    expect(isDuplicateCR(undefined, 'dk-1')).toBe(false);
+  });
+
+  it('should return false when no matching drift_key', () => {
+    const pending = [
+      { cr_id: 'CR-1', change_type: 'config', target_phase: 'QA_VALIDATION', status: 'proposed', drift_key: 'dk-other' },
+    ];
+    expect(isDuplicateCR(pending, 'dk-1')).toBe(false);
+  });
+
+  it('should return true for proposed CR with same drift_key', () => {
+    const pending = [
+      { cr_id: 'CR-1', change_type: 'config', target_phase: 'QA_VALIDATION', status: 'proposed', drift_key: 'dk-1' },
+    ];
+    expect(isDuplicateCR(pending, 'dk-1')).toBe(true);
+  });
+
+  it('should return true for approved CR with same drift_key', () => {
+    const pending = [
+      { cr_id: 'CR-1', change_type: 'config', target_phase: 'QA_VALIDATION', status: 'approved', drift_key: 'dk-1' },
+    ];
+    expect(isDuplicateCR(pending, 'dk-1')).toBe(true);
+  });
+
+  it('should return true for resolved CR with same drift_key', () => {
+    const pending = [
+      { cr_id: 'CR-1', change_type: 'config', target_phase: 'QA_VALIDATION', status: 'resolved', drift_key: 'dk-1' },
+    ];
+    expect(isDuplicateCR(pending, 'dk-1')).toBe(true);
+  });
+
+  it('should return false when only rejected CR has same drift_key', () => {
+    const pending = [
+      { cr_id: 'CR-1', change_type: 'config', target_phase: 'QA_VALIDATION', status: 'rejected', drift_key: 'dk-1' },
+    ];
+    expect(isDuplicateCR(pending, 'dk-1')).toBe(false);
   });
 });

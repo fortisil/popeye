@@ -23,6 +23,15 @@ export interface WebsiteDebugTrace {
     dataSource: 'strategy' | 'docs' | 'defaults' | 'skipped';
     itemCount: number;
   }>;
+  /** Pricing extraction diagnostics */
+  pricingDiagnostics?: {
+    charsScanned: number;
+    foundPricingHeader: boolean;
+    extractionMethod: 'known_plan_names' | 'table_fallback' | 'ai' | 'none';
+    extractedTiers?: Array<{ name: string; price: string }>;
+    reasonIfEmpty?: string;
+    source: 'docs' | 'ai' | 'default' | 'none';
+  };
   /** Validation result from quality gate */
   validationPassed: boolean;
   validationIssues: string[];
@@ -103,6 +112,23 @@ export function formatDebugTrace(trace: WebsiteDebugTrace): string {
     }
   }
   lines.push('');
+
+  if (trace.pricingDiagnostics) {
+    lines.push('Pricing Diagnostics:');
+    lines.push(`  Source: ${trace.pricingDiagnostics.source}`);
+    lines.push(`  Method: ${trace.pricingDiagnostics.extractionMethod}`);
+    lines.push(`  Chars Scanned: ${trace.pricingDiagnostics.charsScanned}`);
+    lines.push(`  Found Header: ${trace.pricingDiagnostics.foundPricingHeader}`);
+    if (trace.pricingDiagnostics.extractedTiers?.length) {
+      for (const t of trace.pricingDiagnostics.extractedTiers) {
+        lines.push(`  - ${t.name}: ${t.price}`);
+      }
+    }
+    if (trace.pricingDiagnostics.reasonIfEmpty) {
+      lines.push(`  Reason empty: ${trace.pricingDiagnostics.reasonIfEmpty}`);
+    }
+    lines.push('');
+  }
 
   lines.push(`Validation: ${trace.validationPassed ? 'PASSED' : 'FAILED'}`);
   if (trace.validationIssues.length > 0) {

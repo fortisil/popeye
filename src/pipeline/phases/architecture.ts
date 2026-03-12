@@ -11,12 +11,12 @@ import { successResult, failureResult } from './phase-context.js';
 import { generateRepoSnapshot, createSnapshotArtifact } from '../repo-snapshot.js';
 
 export async function runArchitecture(context: PhaseContext): Promise<PhaseResult> {
-  const { pipeline, artifactManager, skillLoader, projectDir } = context;
+  const { pipeline, artifactManager, skillLoader, skillUsageRegistry, projectDir } = context;
   const artifacts = [];
 
   try {
-    // 1. Load architect skill
-    const architectSkill = skillLoader.loadSkill('ARCHITECT');
+    // 1. Load architect skill with metadata
+    const { definition: architectSkill, meta: architectMeta } = skillLoader.loadSkillWithMeta('ARCHITECT');
 
     // 2. Read approved master plan
     const masterPlanArtifact = pipeline.artifacts.find((a) => a.type === 'master_plan');
@@ -49,6 +49,9 @@ export async function runArchitecture(context: PhaseContext): Promise<PhaseResul
 
     const result = await executePrompt(architecturePrompt);
     const architectureDoc = result.response;
+
+    // Record skill usage — architect skill injected into prompt
+    skillUsageRegistry.record('ARCHITECT', 'ARCHITECTURE', 'system_prompt', architectMeta.source, architectMeta.version);
 
     // 4. Store architecture artifact
     const archEntry = artifactManager.createAndStoreText(

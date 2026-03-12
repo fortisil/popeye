@@ -10,7 +10,8 @@ import type { GenerationResult } from './python.js';
 import { generateFullstackProject } from './fullstack.js';
 import { generateWebsiteProject } from './website.js';
 import type { WebsiteContentContext } from './website-context.js';
-import { buildWebsiteContext, validateWebsiteContext } from './website-context.js';
+import { buildWebsiteContext, validateWebsiteContext, resolveBrandAssets, extractDocPathsFromText } from './website-context.js';
+import { loadWebsiteStrategy } from '../workflow/website-strategy.js';
 import {
   generateDesignTokensPackage as generateDesignTokensPackageImpl,
   generateUiPackage as generateUiPackageImpl,
@@ -392,7 +393,8 @@ export async function generateAllProject(
     let contextWarning: string | undefined;
     if (!contentContext) {
       try {
-        contentContext = await buildWebsiteContext(projectDir, projectName);
+        const extraDocPaths = spec.idea ? extractDocPathsFromText(spec.idea) : [];
+        contentContext = await buildWebsiteContext(projectDir, projectName, spec.idea, extraDocPaths);
       } catch (e) {
         contextWarning = e instanceof Error ? e.message : 'Unknown error building website context';
         // Proceed with defaults, but warning is logged below
@@ -401,6 +403,25 @@ export async function generateAllProject(
     if (contextWarning) {
       // Log warning so user sees it, but don't block generation
       console.warn(`[website-context] Warning: ${contextWarning}`);
+    }
+
+    // Resolve brand assets (logo output path) — must happen after buildWebsiteContext
+    if (contentContext?.brand) {
+      try {
+        contentContext.brandAssets = await resolveBrandAssets(projectDir, contentContext.brand);
+      } catch {
+        // Non-fatal: brand assets are optional
+      }
+    }
+
+    // Load website strategy if previously generated (e.g. re-scaffold)
+    try {
+      const strategyData = await loadWebsiteStrategy(projectDir);
+      if (strategyData && contentContext) {
+        contentContext.strategy = strategyData.strategy;
+      }
+    } catch {
+      // Strategy won't exist on first scaffold — generated later by runPlanMode
     }
 
     // Soft validation: log quality issues without blocking monorepo generation
@@ -419,12 +440,14 @@ export async function generateAllProject(
     filesCreated.push(...fullstackResult.filesCreated);
 
     // Generate website app
+    // skipValidation: strategy is generated later by runPlanMode, not at scaffold time
     const websiteResult = await generateWebsiteProject(spec, projectDir, {
       baseDir: path.join(projectDir, 'apps', 'website'),
       workspaceMode: true,
       skipDocker: true, // Website runs outside Docker (npm run dev / npm start)
       skipReadme: false,
       contentContext: contentContext,
+      skipValidation: true,
     });
     if (!websiteResult.success) {
       return {

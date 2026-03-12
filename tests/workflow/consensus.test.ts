@@ -42,7 +42,9 @@ describe('extractConcerns', () => {
     const result: ConsensusResult = {
       score: 80,
       analysis: 'Good plan overall',
+      strengths: [],
       concerns: ['Missing error handling', 'No tests defined'],
+      blockingIssues: [],
       recommendations: ['Add logging', 'Consider caching'],
       approved: false,
       rawResponse: '',
@@ -60,6 +62,10 @@ describe('extractConcerns', () => {
     const result: ConsensusResult = {
       score: 95,
       analysis: 'Perfect',
+      strengths: [],
+      concerns: [],
+      blockingIssues: [],
+      recommendations: [],
       approved: true,
       rawResponse: '',
     };

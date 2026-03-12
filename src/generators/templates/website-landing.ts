@@ -26,7 +26,7 @@ function escapeJsx(str: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
     .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
+    .replace(/\$(?=\{)/g, '\\$');
 }
 
 /**

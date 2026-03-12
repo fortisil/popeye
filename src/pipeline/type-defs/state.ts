@@ -9,6 +9,7 @@ import { GateCheckTypeSchema, GateCheckResultSchema, ResolvedCommandsSchema, typ
 import type { ArtifactType } from './artifacts.js';
 import type { ConsensusPacket } from './packets.js';
 import type { RCAPacket } from './packets.js';
+// Reason: SkillUsageEvent type is defined inline in the Zod schema to keep state serialization self-contained
 
 // ─── Gate Definition ─────────────────────────────────────
 
@@ -88,6 +89,7 @@ export const PipelineStateSchema = z.object({
     missingArtifacts: z.array(ArtifactTypeSchema),
     failedChecks: z.array(GateCheckTypeSchema),
     consensusScore: z.number().optional(),
+    finalStatus: z.string().optional(),  // v2.4.3: 'APPROVED' | 'REJECTED' | 'ARBITRATED'
     timestamp: z.string(),
   })),
   gateChecks: z.record(z.string(), z.array(GateCheckResultSchema)),
@@ -97,6 +99,12 @@ export const PipelineStateSchema = z.object({
   resolvedCommands: ResolvedCommandsSchema.optional(),
   /** Tracks which phase failed, for recovery routing */
   failedPhase: PipelinePhaseSchema.optional(),
+  /** Last rewind target from recovery — detects repeated same-target rewinds (v2.4.6) */
+  lastRewindTarget: PipelinePhaseSchema.optional(),
+  /** v2.6.0: Auto-recovery result — tracks whether arbitrator guidance was attempted before STUCK */
+  autoRecoveryResult: z.enum(['success', 'timeout', 'invalid', 'error']).optional(),
+  /** v2.7.0: Baseline failure count before recovery — for regression detection */
+  recoveryBaselineFailedCheckCount: z.number().int().min(0).optional(),
   /** Session guidance: user steering, upgrade context, or resume instructions */
   sessionGuidance: z.string().optional(),
   /** Pending change requests that force re-routing to consensus phases (v1.1) */
@@ -104,7 +112,23 @@ export const PipelineStateSchema = z.object({
     cr_id: z.string(),
     change_type: z.enum(['scope', 'architecture', 'dependency', 'config', 'requirement']),
     target_phase: PipelinePhaseSchema,
-    status: z.enum(['proposed', 'approved', 'rejected']),
+    status: z.enum(['proposed', 'approved', 'rejected', 'resolved']),
+    drift_key: z.string().optional(),
+  })).optional(),
+  /** ID of the CR currently being processed by the routed phase (v2.4.9) */
+  activeChangeRequestId: z.string().optional(),
+  /** Snapshot override: after config CR resolved, REVIEW uses this instead of CONSENSUS_ROLE_PLANS baseline (v2.4.9) */
+  baselineSnapshotOverride: ArtifactRefSchema.optional(),
+  /** Rolling loop signatures for stagnation detection (v2.4.9) */
+  lastSignatures: z.array(z.string()).optional(),
+  /** Skill usage events for coverage enforcement (v2.2.1) */
+  skillUsageEvents: z.array(z.object({
+    role: PipelineRoleSchema,
+    phase: PipelinePhaseSchema,
+    used_as: z.enum(['system_prompt', 'review_prompt', 'arbitration_prompt', 'role_context', 'planning_prompt', 'other']),
+    skill_source: z.enum(['project_override', 'defaults']),
+    skill_version: z.string().optional(),
+    timestamp: z.string(),
   })).optional(),
 });
 export type PipelineState = z.infer<typeof PipelineStateSchema>;
@@ -163,5 +187,6 @@ export function createDefaultPipelineState(): PipelineState {
     gateChecks: {},
     activeRoles: [],
     constitutionHash: '',
+    skillUsageEvents: [],
   };
 }

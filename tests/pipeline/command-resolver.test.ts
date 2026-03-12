@@ -155,5 +155,47 @@ describe('CommandResolver', () => {
       expect(cmds.build).toBeUndefined();
       expect(cmds.test).toBeUndefined();
     });
+
+    it('should resolve install command for npm project', () => {
+      const snap = makeSnapshot({
+        config_files: [makeConfig('package.json')],
+        package_manager: 'npm',
+        scripts: {},
+      });
+
+      const cmds = resolveCommands(snap);
+      expect(cmds.install).toBe('npm install');
+    });
+
+    it('should resolve install command for yarn project', () => {
+      const snap = makeSnapshot({
+        config_files: [makeConfig('package.json')],
+        package_manager: 'yarn',
+        scripts: {},
+      });
+
+      const cmds = resolveCommands(snap);
+      expect(cmds.install).toBe('yarn install');
+    });
+
+    it('should resolve install command for python with requirements.txt', () => {
+      const snap = makeSnapshot({
+        config_files: [makeConfig('requirements.txt')],
+        languages_detected: ['python'],
+      });
+
+      const cmds = resolveCommands(snap);
+      expect(cmds.install).toBe('pip install -r requirements.txt');
+    });
+
+    it('should not resolve install for pyproject.toml-only python', () => {
+      const snap = makeSnapshot({
+        config_files: [makeConfig('pyproject.toml')],
+        languages_detected: ['python'],
+      });
+
+      const cmds = resolveCommands(snap);
+      expect(cmds.install).toBeUndefined();
+    });
   });
 });

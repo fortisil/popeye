@@ -7,6 +7,7 @@ import OpenAI from 'openai';
 import type { ConsensusResult, ConsensusConfig, OpenAIModel, OutputLanguage } from '../types/index.js';
 import { getOpenAIToken } from '../auth/index.js';
 import { DEFAULT_CONSENSUS_CONFIG } from '../types/consensus.js';
+import { normalizeIssueList } from '../shared/text-utils.js';
 
 /**
  * Create an OpenAI client with stored credentials
@@ -87,9 +88,10 @@ ${plan}
 Please provide:
 1. ANALYSIS: Detailed review of the plan
 2. STRENGTHS: What works well
-3. CONCERNS: Issues or gaps identified
-4. RECOMMENDATIONS: Specific improvements
-5. CONSENSUS SCORE: A percentage (0-100%) indicating your agreement
+3. CONCERNS: Non-blocking issues, minor gaps, or suggestions for improvement
+4. BLOCKING_ISSUES: Critical issues that MUST be resolved before proceeding (security, data loss, missing requirements, broken architecture). Write "None" if no blocking issues.
+5. RECOMMENDATIONS: Specific improvements
+6. CONSENSUS SCORE: A percentage (0-100%) indicating your agreement
    - 95-100%: Ready for execution
    - 80-94%: Minor revisions needed
    - 60-79%: Significant revisions needed
@@ -109,15 +111,22 @@ export function parseConsensusResponse(response: string): ConsensusResult {
   const scoreMatch = response.match(/CONSENSUS:\s*(\d+)%/i);
   const score = scoreMatch ? parseInt(scoreMatch[1], 10) : 0;
 
-  // Extract sections
+  // Extract sections — handle backward compat when BLOCKING_ISSUES is absent
   const analysis = extractSection(response, 'ANALYSIS', 'STRENGTHS');
   const strengthsText = extractSection(response, 'STRENGTHS', 'CONCERNS');
-  const concernsText = extractSection(response, 'CONCERNS', 'RECOMMENDATIONS');
+  const hasBlockingIssues = /BLOCKING_ISSUES[:\s]/i.test(response);
+  const concernsText = hasBlockingIssues
+    ? extractSection(response, 'CONCERNS', 'BLOCKING_ISSUES')
+    : extractSection(response, 'CONCERNS', 'RECOMMENDATIONS');
+  const blockingIssuesText = hasBlockingIssues
+    ? extractSection(response, 'BLOCKING_ISSUES', 'RECOMMENDATIONS')
+    : '';
   const recommendationsText = extractSection(response, 'RECOMMENDATIONS', 'CONSENSUS');
 
   // Parse lists from sections
   const strengths = parseList(strengthsText);
   const concerns = parseList(concernsText);
+  const blockingIssues = normalizeIssueList(parseList(blockingIssuesText));
   const recommendations = parseList(recommendationsText);
 
   return {
@@ -125,6 +134,7 @@ export function parseConsensusResponse(response: string): ConsensusResult {
     analysis: analysis.trim(),
     strengths,
     concerns,
+    blockingIssues,
     recommendations,
     approved: score >= 95,
     rawResponse: response,
@@ -215,6 +225,44 @@ function parseList(text: string): string[] {
  */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Send a prompt directly to the OpenAI API and return the raw response string.
+ * No prompt wrapping or response parsing — used by the consensus runner
+ * which builds its own prompts and parses responses itself.
+ *
+ * @param prompt - The complete prompt to send
+ * @param config - Consensus configuration for model/temperature/maxTokens
+ * @returns Raw LLM response text
+ */
+export async function requestRawReview(
+  prompt: string,
+  config: Partial<ConsensusConfig> = {},
+): Promise<string> {
+  const {
+    openaiModel = DEFAULT_CONSENSUS_CONFIG.openaiModel,
+    temperature = DEFAULT_CONSENSUS_CONFIG.temperature,
+    maxTokens = DEFAULT_CONSENSUS_CONFIG.maxTokens,
+  } = config;
+
+  const client = await createClient();
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: openaiModel,
+      messages: [{ role: 'user', content: prompt }],
+      temperature,
+      max_tokens: maxTokens,
+    });
+    return completion.choices[0]?.message?.content || '';
+  } catch (error) {
+    if (error instanceof OpenAI.RateLimitError) {
+      await sleep(5000);
+      return requestRawReview(prompt, config);
+    }
+    throw error;
+  }
 }
 
 /**

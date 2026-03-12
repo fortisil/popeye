@@ -241,7 +241,7 @@ export function createCreateCommand(): Command {
             printConsensusResult(
               workflowResult.planResult.consensusResult.iterations[
                 workflowResult.planResult.consensusResult.iterations.length - 1
-              ]?.result || { score: 0, analysis: '', approved: false, rawResponse: '' }
+              ]?.result || { score: 0, analysis: '', approved: false, rawResponse: '', strengths: [], concerns: [], blockingIssues: [], recommendations: [] }
             );
           }
 

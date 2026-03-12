@@ -44,6 +44,7 @@ export async function runConsensusRolePlans(context: PhaseContext): Promise<Phas
     const masterPlanArtifact = pipeline.artifacts.find((a) => a.type === 'master_plan');
 
     // 3. Build plan packet referencing all role plans
+    // v2.4.4: version tracks plan revision count for recovery loop convergence
     const planPacket = buildPlanPacket({
       phase: 'CONSENSUS_ROLE_PLANS',
       submittedBy: 'DISPATCHER',
@@ -62,11 +63,18 @@ export async function runConsensusRolePlans(context: PhaseContext): Promise<Phas
       ],
       dependencies: [],
       constraints: [],
+      version: pipeline.recoveryCount + 1,
     });
 
     // 4. Run consensus
+    // v2.4.4: pass revisionDirective from sessionGuidance so reviewers see prior feedback
     const gateDef = gateEngine.getGateDefinition('CONSENSUS_ROLE_PLANS');
-    const consensusPacket = await consensusRunner.runStructuredConsensus(planPacket, gateDef);
+    const revisionDirective = pipeline.recoveryCount > 0 && pipeline.sessionGuidance?.trim()
+      ? pipeline.sessionGuidance
+      : undefined;
+    const consensusPacket = await consensusRunner.runStructuredConsensus(planPacket, gateDef, {
+      revisionDirective,
+    });
 
     // 5. Store consensus artifact
     const consensusEntry = artifactManager.createAndStoreJson(
@@ -86,6 +94,7 @@ export async function runConsensusRolePlans(context: PhaseContext): Promise<Phas
       missingArtifacts: [],
       failedChecks: [],
       consensusScore: consensusPacket.consensus_result.score,
+      finalStatus: consensusPacket.final_status,  // v2.4.3: propagate for gate engine
       timestamp: new Date().toISOString(),
     };
 

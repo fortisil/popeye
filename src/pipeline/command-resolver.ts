@@ -40,14 +40,21 @@ export function resolveCommands(
     case 'python':
       resolved = resolvePythonCommands(snapshot);
       break;
-    case 'mixed':
+    case 'mixed': {
       // Prefer Node commands, augment with Python where Node is missing
       resolved = resolveNodeCommands(pm, scripts, snapshot);
+      const pyResolved = resolvePythonCommands(snapshot);
       if (!resolved.test) {
-        const pyResolved = resolvePythonCommands(snapshot);
         resolved.test = pyResolved.test;
       }
+      // Chain both install commands for mixed projects
+      if (resolved.install && pyResolved.install) {
+        resolved.install = `${resolved.install} && ${pyResolved.install}`;
+      } else if (!resolved.install) {
+        resolved.install = pyResolved.install;
+      }
       break;
+    }
     default:
       resolved = { resolved_from: 'none' };
   }
@@ -60,6 +67,8 @@ export function resolveCommands(
     if (overrides.typecheck) resolved.typecheck = overrides.typecheck;
     if (overrides.migrations) resolved.migrations = overrides.migrations;
     if (overrides.start) resolved.start = overrides.start;
+    if (overrides.install) resolved.install = overrides.install;
+    if (overrides.install_cwd) resolved.install_cwd = overrides.install_cwd;
   }
 
   return resolved;
@@ -120,6 +129,19 @@ function resolveNodeCommands(
     resolved.start = `${run} dev`;
   }
 
+  // Install — always resolve based on package manager
+  resolved.install = pm === 'yarn' ? 'yarn install' : `${pm} install`;
+
+  // Workspace detection: install must run at the workspace root
+  const rootPkg = snapshot.config_files.find((c) => c.type === 'package.json');
+  const hasWorkspaces = rootPkg?.key_fields?.workspaces !== undefined;
+  const hasPnpmWorkspace = snapshot.config_files.some(
+    (c) => c.type === 'pnpm-workspace.yaml',
+  );
+  if (hasWorkspaces || hasPnpmWorkspace) {
+    resolved.install_cwd = '.';
+  }
+
   return resolved;
 }
 
@@ -163,6 +185,16 @@ function resolvePythonCommands(snapshot: RepoSnapshot): ResolvedCommands {
 
   // Start
   resolved.start = 'uvicorn main:app --host 0.0.0.0 --port 8000';
+
+  // Install — conservative: only well-known safe patterns
+  const hasPoetryLock = snapshot.config_files.some((c) => c.type === 'poetry.lock');
+  const hasReqs = snapshot.config_files.some((c) => c.type === 'requirements.txt');
+  if (hasPoetryLock) {
+    resolved.install = 'poetry install';
+  } else if (hasReqs) {
+    resolved.install = 'pip install -r requirements.txt';
+  }
+  // No install for pyproject.toml-only (may need build backends, system deps)
 
   return resolved;
 }

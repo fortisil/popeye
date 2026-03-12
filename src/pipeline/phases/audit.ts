@@ -13,7 +13,7 @@ import type { AuditFinding, ArtifactEntry, ChangeRequest } from '../types.js';
 import type { ArtifactManager } from '../artifact-manager.js';
 
 export async function runAudit(context: PhaseContext): Promise<PhaseResult> {
-  const { pipeline, artifactManager, skillLoader, projectDir } = context;
+  const { pipeline, artifactManager, skillLoader, skillUsageRegistry, projectDir } = context;
   const artifacts = [];
 
   try {
@@ -23,8 +23,8 @@ export async function runAudit(context: PhaseContext): Promise<PhaseResult> {
     artifacts.push(snapshotEntry);
     pipeline.latestRepoSnapshot = artifactManager.toArtifactRef(snapshotEntry);
 
-    // 2. Load auditor skill
-    const auditorSkill = skillLoader.loadSkill('AUDITOR');
+    // 2. Load auditor skill with metadata
+    const { definition: auditorSkill, meta: auditorMeta } = skillLoader.loadSkillWithMeta('AUDITOR');
 
     // 3. Run audit checks via Claude
     const { executePrompt } = await import('../../adapters/claude.js');
@@ -52,6 +52,9 @@ export async function runAudit(context: PhaseContext): Promise<PhaseResult> {
 
     const auditResult = await executePrompt(auditPrompt);
     const auditResponse = auditResult.response;
+
+    // Record skill usage — auditor skill injected into audit prompt
+    skillUsageRegistry.record('AUDITOR', 'AUDIT', 'system_prompt', auditorMeta.source, auditorMeta.version);
 
     // 4. Parse findings from audit response (simplified extraction)
     const findings = parseAuditFindings(auditResponse);

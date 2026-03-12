@@ -9,6 +9,7 @@ import {
   generateWebsiteFooter,
   generateWebsiteNavigation,
 } from '../../src/generators/templates/website-components.js';
+import { getWebsiteProjectFiles } from '../../src/generators/website.js';
 import type { WebsiteContentContext } from '../../src/generators/website-context.js';
 import type { WebsiteStrategyDocument } from '../../src/types/website-strategy.js';
 
@@ -131,6 +132,39 @@ describe('generateWebsiteFooter', () => {
     expect(footer).toContain('Product');
     expect(footer).toContain('Resources');
     expect(footer).toContain('Legal');
+  });
+
+  it('all default footer hrefs have corresponding generated pages', () => {
+    const footer = generateWebsiteFooter('deploy-ai', contextNoLogo);
+    const generatedFiles = getWebsiteProjectFiles('deploy-ai');
+
+    // Extract all href values from the default footer
+    const hrefPattern = /href:\s*'([^']+)'/g;
+    let match;
+    const hrefs: string[] = [];
+    while ((match = hrefPattern.exec(footer)) !== null) {
+      hrefs.push(match[1]);
+    }
+
+    // Build set of generated page routes from file paths
+    const pageRoutes = new Set<string>();
+    for (const file of generatedFiles) {
+      const pageMatch = file.match(/^src\/app(.*)\/page\.tsx$/);
+      if (pageMatch) {
+        pageRoutes.add(pageMatch[1] || '/');
+      }
+    }
+    // Also add root route
+    if (generatedFiles.includes('src/app/page.tsx')) {
+      pageRoutes.add('/');
+    }
+
+    // Every non-anchor internal href should correspond to a generated page
+    for (const href of hrefs) {
+      if (href.startsWith('/#')) continue; // Anchor links are fine
+      if (!href.startsWith('/')) continue; // External links are fine
+      expect(pageRoutes.has(href)).toBe(true);
+    }
   });
 });
 

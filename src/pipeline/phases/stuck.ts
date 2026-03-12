@@ -36,6 +36,16 @@ export async function runStuck(context: PhaseContext): Promise<PhaseResult> {
       '- Determine if scope changes are needed',
       '- Decide whether to restart pipeline from a specific phase',
       '',
+      // v2.6.0: Auto-recovery attempt details
+      ...(pipeline.autoRecoveryResult ? [
+        '## Auto-Recovery Attempt',
+        `Result: ${pipeline.autoRecoveryResult}`,
+        (() => {
+          const autoArtifact = pipeline.artifacts.find(a => a.type === 'auto_recovery_guidance');
+          return autoArtifact ? `Guidance: ${autoArtifact.path}` : 'No guidance artifact generated.';
+        })(),
+        '',
+      ] : []),
       '## Artifacts That May Need Update',
       ...pipeline.artifacts
         .filter((a) => a.phase === pipeline.failedPhase)

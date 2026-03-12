@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import type { PipelineRole } from '../../src/pipeline/types.js';
 import {
   buildRoleExecutionContext,
   executeWithRoleContext,
@@ -252,6 +253,7 @@ describe('buildAllRoleContexts', () => {
 
     const mockSkillLoader = {
       loadSkill: (role: string) => makeMockSkill(role),
+      loadSkillWithMeta: (role: string) => ({ definition: makeMockSkill(role), meta: { source: 'defaults' as const } }),
       listSkills: () => [],
     };
 
@@ -276,6 +278,7 @@ describe('buildAllRoleContexts', () => {
 
     const mockSkillLoader = {
       loadSkill: (role: string) => makeMockSkill(role),
+      loadSkillWithMeta: (role: string) => ({ definition: makeMockSkill(role), meta: { source: 'defaults' as const } }),
       listSkills: () => [],
     };
 
@@ -290,10 +293,95 @@ describe('buildAllRoleContexts', () => {
 
     const mockSkillLoader = {
       loadSkill: (role: string) => makeMockSkill(role),
+      loadSkillWithMeta: (role: string) => ({ definition: makeMockSkill(role), meta: { source: 'defaults' as const } }),
       listSkills: () => [],
     };
 
     const contexts = buildAllRoleContexts(pipeline, mockSkillLoader as any, TEST_DIR);
     expect(contexts.size).toBe(0);
+  });
+});
+
+describe('strategy injection into execution prompts', () => {
+  function makeValidStrategy() {
+    return {
+      icp: { primaryPersona: 'developers', painPoints: ['slow builds'], goals: ['fast CI'], objections: ['cost'] },
+      positioning: { category: 'DevTools', differentiators: ['speed'], valueProposition: 'Build faster', proofPoints: ['10x'] },
+      messaging: { headline: 'Build Faster', subheadline: 'CI that works', elevatorPitch: 'Fast CI', longDescription: 'A fast CI platform' },
+      seoStrategy: { primaryKeywords: ['CI'], secondaryKeywords: ['build'], longTailKeywords: ['fast CI'], titleTemplates: {}, metaDescriptions: {} },
+      siteArchitecture: {
+        pages: [{ path: '/', title: 'Home', purpose: 'Landing', pageType: 'landing', sections: ['hero'], seoKeywords: ['CI'], conversionGoal: 'signup' }],
+        navigation: [{ label: 'Home', href: '/' }],
+        footerSections: [{ title: 'Links', links: [{ label: 'Home', href: '/' }] }],
+      },
+      conversionStrategy: {
+        primaryCta: { text: 'Get Started', href: '/signup' },
+        secondaryCta: { text: 'Learn More', href: '/docs' },
+        trustSignals: ['SOC2'],
+        socialProof: ['1000+ teams'],
+        leadCapture: 'webhook',
+      },
+      competitiveContext: { category: 'CI/CD', competitors: ['CircleCI'], differentiators: ['speed'] },
+    };
+  }
+
+  it('WEBSITE_PROGRAMMER system prompt includes strategy when file exists', () => {
+    mkdirSync(join(TEST_DIR, '.popeye'), { recursive: true });
+    writeFileSync(
+      join(TEST_DIR, '.popeye', 'website-strategy.json'),
+      JSON.stringify(makeValidStrategy()),
+    );
+
+    const artifact = makeRolePlanArtifact('WEBSITE_PROGRAMMER');
+    writeFileSync(join(TEST_DIR, artifact.path), '# WEBSITE_PROGRAMMER Plan\n## Tasks\n- Build site');
+
+    const ctx = buildRoleExecutionContext(
+      'WEBSITE_PROGRAMMER',
+      makeMockSkill('WEBSITE_PROGRAMMER'),
+      artifact,
+      TEST_DIR,
+    );
+
+    expect(ctx.systemPrompt).toContain('Website Marketing Strategy');
+    expect(ctx.systemPrompt).toContain('Target Customer');
+    expect(ctx.systemPrompt).toContain('developers');
+  });
+
+  it('BACKEND_PROGRAMMER system prompt does NOT include strategy', () => {
+    mkdirSync(join(TEST_DIR, '.popeye'), { recursive: true });
+    writeFileSync(
+      join(TEST_DIR, '.popeye', 'website-strategy.json'),
+      JSON.stringify(makeValidStrategy()),
+    );
+
+    const artifact = makeRolePlanArtifact('BACKEND_PROGRAMMER');
+    writeFileSync(join(TEST_DIR, artifact.path), '# BACKEND_PROGRAMMER Plan\n## Tasks\n- Build API');
+
+    const ctx = buildRoleExecutionContext(
+      'BACKEND_PROGRAMMER',
+      makeMockSkill('BACKEND_PROGRAMMER'),
+      artifact,
+      TEST_DIR,
+    );
+
+    expect(ctx.systemPrompt).not.toContain('Website Marketing Strategy');
+    expect(ctx.systemPrompt).not.toContain('Target Customer');
+  });
+
+  it('handles missing strategy file gracefully (no crash, prompt still valid)', () => {
+    // No .popeye directory, no strategy file
+    const artifact = makeRolePlanArtifact('WEBSITE_PROGRAMMER');
+    writeFileSync(join(TEST_DIR, artifact.path), '# WEBSITE_PROGRAMMER Plan\n## Tasks\n- Build site');
+
+    const ctx = buildRoleExecutionContext(
+      'WEBSITE_PROGRAMMER',
+      makeMockSkill('WEBSITE_PROGRAMMER'),
+      artifact,
+      TEST_DIR,
+    );
+
+    expect(ctx.role).toBe('WEBSITE_PROGRAMMER');
+    expect(ctx.systemPrompt).toContain('WEBSITE_PROGRAMMER');
+    expect(ctx.systemPrompt).not.toContain('Website Marketing Strategy');
   });
 });

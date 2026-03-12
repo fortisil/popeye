@@ -16,6 +16,9 @@ import {
   generateWebsiteTest,
   generateWebsiteDocsPage,
   generateWebsiteBlogPage,
+  generateWebsiteContactPage,
+  generateWebsitePrivacyPage,
+  generateWebsiteTermsPage,
 } from './templates/website.js';
 import {
   generateWebsitePackageJson,
@@ -134,6 +137,9 @@ export async function generateWebsiteProject(
     await ensureDir(path.join(projectDir, 'src', 'app', 'pricing'));
     await ensureDir(path.join(projectDir, 'src', 'app', 'docs'));
     await ensureDir(path.join(projectDir, 'src', 'app', 'blog'));
+    await ensureDir(path.join(projectDir, 'src', 'app', 'contact'));
+    await ensureDir(path.join(projectDir, 'src', 'app', 'privacy'));
+    await ensureDir(path.join(projectDir, 'src', 'app', 'terms'));
     await ensureDir(path.join(projectDir, 'src', 'app', 'api', 'lead'));
     await ensureDir(path.join(projectDir, 'src', 'components'));
     await ensureDir(path.join(projectDir, 'src', 'lib'));
@@ -187,6 +193,7 @@ export async function generateWebsiteProject(
           pricingTiers: contentContext.pricing?.length || 0,
         },
         sectionsRendered: [],
+        pricingDiagnostics: contentContext.pricingDiagnostics,
         validationPassed: true,
         validationIssues: [],
       };
@@ -206,7 +213,10 @@ export async function generateWebsiteProject(
       },
       {
         path: path.join(projectDir, 'tsconfig.json'),
-        content: generateWebsiteTsconfig(),
+        content: generateWebsiteTsconfig({
+          workspaceMode,
+          projectName: workspaceMode ? projectName : undefined,
+        }),
       },
       {
         path: path.join(projectDir, 'tailwind.config.ts'),
@@ -248,11 +258,23 @@ export async function generateWebsiteProject(
       },
       {
         path: path.join(projectDir, 'src', 'app', 'docs', 'page.tsx'),
-        content: generateWebsiteDocsPage(),
+        content: generateWebsiteDocsPage(projectName, contentContext),
       },
       {
         path: path.join(projectDir, 'src', 'app', 'blog', 'page.tsx'),
-        content: generateWebsiteBlogPage(),
+        content: generateWebsiteBlogPage(projectName, contentContext),
+      },
+      {
+        path: path.join(projectDir, 'src', 'app', 'contact', 'page.tsx'),
+        content: generateWebsiteContactPage(projectName, contentContext),
+      },
+      {
+        path: path.join(projectDir, 'src', 'app', 'privacy', 'page.tsx'),
+        content: generateWebsitePrivacyPage(projectName, contentContext),
+      },
+      {
+        path: path.join(projectDir, 'src', 'app', 'terms', 'page.tsx'),
+        content: generateWebsiteTermsPage(projectName, contentContext),
       },
 
       // Shared components
@@ -462,6 +484,9 @@ export function getWebsiteProjectFiles(_projectName: string): string[] {
     'src/app/pricing/page.tsx',
     'src/app/docs/page.tsx',
     'src/app/blog/page.tsx',
+    'src/app/contact/page.tsx',
+    'src/app/privacy/page.tsx',
+    'src/app/terms/page.tsx',
     'src/app/sitemap.ts',
     'src/app/robots.ts',
     // Tests

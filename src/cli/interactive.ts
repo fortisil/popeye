@@ -293,6 +293,8 @@ interface SessionState {
   reviewer: AIProvider;
   arbitrator: AIProvider;
   enableArbitration: boolean;
+  /** v2.5.4: Callback to recreate readline after workflow runs (stdin corruption fix) */
+  refreshReadline?: () => void;
 }
 
 /**
@@ -315,6 +317,82 @@ function getBuildLabel(language: string): string {
     case 'all': return 'Fullstack + Website';
     default: return language;
   }
+}
+
+/**
+ * Get language-specific next steps for the project completion summary.
+ * Returns an array of instruction strings the user should follow after generation.
+ */
+function getNextSteps(language: string, projectDir: string): string[] {
+  const steps: string[] = [];
+
+  switch (language) {
+    case 'website':
+      steps.push('cd ' + projectDir);
+      steps.push('npm install');
+      steps.push('npm run dev        # Start the development server');
+      steps.push('Open http://localhost:3000 in your browser');
+      steps.push('npm run build      # Create production build');
+      break;
+
+    case 'typescript':
+    case 'javascript':
+      steps.push('cd ' + projectDir);
+      steps.push('npm install');
+      steps.push('npm run dev        # Start the development server');
+      steps.push('npm test           # Run tests');
+      steps.push('npm run build      # Create production build');
+      break;
+
+    case 'python':
+      steps.push('cd ' + projectDir);
+      steps.push('python -m venv venv && source venv/bin/activate');
+      steps.push('pip install -r requirements.txt');
+      steps.push('python main.py     # Run the application');
+      steps.push('pytest             # Run tests');
+      break;
+
+    case 'fullstack':
+      steps.push('cd ' + projectDir);
+      steps.push('npm install        # Install workspace dependencies');
+      steps.push('# Frontend:');
+      steps.push('cd apps/frontend && npm run dev');
+      steps.push('# Backend:');
+      steps.push('cd apps/backend && pip install -r requirements.txt && python main.py');
+      break;
+
+    case 'all':
+      steps.push('cd ' + projectDir);
+      steps.push('npm install        # Install workspace dependencies');
+      steps.push('# Frontend:');
+      steps.push('cd apps/frontend && npm run dev');
+      steps.push('# Backend:');
+      steps.push('cd apps/backend && pip install -r requirements.txt && python main.py');
+      steps.push('# Website:');
+      steps.push('cd apps/website && npm run dev');
+      break;
+
+    default:
+      steps.push('cd ' + projectDir);
+      steps.push('Review the README.md for setup instructions');
+      break;
+  }
+
+  return steps;
+}
+
+/**
+ * Print next steps section for project completion summary.
+ */
+function printNextSteps(language: string, projectDir: string): void {
+  const steps = getNextSteps(language, projectDir);
+  console.log();
+  console.log(theme.primary.bold('  Next Steps:'));
+  for (const step of steps) {
+    console.log(`    ${theme.dim('$')} ${step}`);
+  }
+  console.log();
+  console.log(`    ${theme.dim('Review the generated README.md for full documentation.')}`);
 }
 
 /**
@@ -1958,7 +2036,10 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
   }
 
   // Only discover projects if no active project with pending work
-  if (!state.projectDir || (await getWorkflowStatus(state.projectDir)).state?.phase === 'complete') {
+  // Reason: Also discover when state.projectDir is CWD but has no project state (project may be in subdirectory)
+  const currentStatus = state.projectDir ? await getWorkflowStatus(state.projectDir) : null;
+  const needsDiscovery = !state.projectDir || !currentStatus?.exists || currentStatus?.state?.phase === 'complete';
+  if (needsDiscovery) {
     // Discover all projects (registered + scanned in current directory)
     console.log();
     printInfo('Scanning for projects...');
@@ -2067,12 +2148,37 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
     const progressAnalysis = await analyzeProjectProgress(state.projectDir);
     const verification = await verifyProjectCompletion(state.projectDir);
 
+    // v2.5.3: Compute failing gates once for STUCK/RECOVERY_LOOP display.
+    // failedPhase can be misleading (e.g. QA_VALIDATION when the real blocker is
+    // CONSENSUS_MASTER_PLAN). Scan all gateResults for actual failures.
+    const pp = status.state.pipeline?.pipelinePhase;
+    const pl = status.state.pipeline;
+    const failingGates = pl
+      ? Object.entries(pl.gateResults)
+          .filter(([, gr]) => !gr.pass)
+          .filter(([, gr]) => gr.blockers.length > 0 || gr.missingArtifacts.length > 0 || gr.failedChecks.length > 0)
+          .sort((a, b) => {
+            const aConsensus = a[1].consensusScore !== undefined ? 0 : 1;
+            const bConsensus = b[1].consensusScore !== undefined ? 0 : 1;
+            if (aConsensus !== bConsensus) return aConsensus - bConsensus;
+            return b[1].blockers.length - a[1].blockers.length;
+          })
+      : [];
+    const blockingAt = failingGates[0]?.[0] ?? pl?.failedPhase ?? 'unknown';
+
     console.log();
     console.log(theme.primary.bold('  Project Status:'));
     console.log(`    ${theme.dim('Name:')}      ${status.state.name}`);
     console.log(`    ${theme.dim('Language:')}  ${theme.primary(status.state.language)}`);
-    console.log(`    ${theme.dim('Phase:')}     ${theme.primary(status.state.phase)}`);
-    console.log(`    ${theme.dim('Status:')}    ${status.state.status}`);
+    if (pp === 'STUCK' || pp === 'RECOVERY_LOOP') {
+      // Reason: toLegacyPhase('STUCK') returns 'execution' and status may be stale 'complete'
+      // from a prior completeProject() call — override both with accurate info.
+      console.log(`    ${theme.dim('Phase:')}     ${theme.error(pp)} (blocking at ${blockingAt})`);
+      console.log(`    ${theme.dim('Status:')}    ${theme.error('requires intervention')}`);
+    } else {
+      console.log(`    ${theme.dim('Phase:')}     ${theme.primary(status.state.phase)}`);
+      console.log(`    ${theme.dim('Status:')}    ${status.state.status}`);
+    }
 
     // Show detailed progress comparison
     console.log();
@@ -2137,8 +2243,85 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
       console.log(theme.dim(`  Plan file: ${progressAnalysis.planParseError}`));
     }
 
-    // Check for status mismatch (status says complete but state tasks are incomplete)
-    if (progressAnalysis.statusMismatch && !progressAnalysis.planMismatch) {
+    // Pipeline-specific messaging takes priority over legacy mismatch
+    // Reason: pp, pl, failingGates, blockingAt already computed above (Change 1)
+    if (pp) {
+      if (pp === 'STUCK') {
+        console.log();
+        console.log(theme.error.bold('  PIPELINE STUCK:'));
+        console.log(theme.error(`    Blocking at: ${blockingAt}`));
+        console.log(theme.error(`    Recovery attempts: ${pl!.recoveryCount ?? 0}/${pl!.maxRecoveryIterations ?? 5}`));
+
+        // Top-line summary: if the primary failing gate has a consensus score, show it
+        const primaryGate = failingGates[0];
+        if (primaryGate?.[1].consensusScore !== undefined) {
+          const threshold = 0.95;
+          console.log(theme.error(`    Consensus score: ${primaryGate[1].consensusScore.toFixed(2)} < ${threshold}`));
+        }
+
+        // Show all failing gates with details
+        if (failingGates.length > 0) {
+          console.log();
+          console.log(theme.warning('  Gate Blockers:'));
+          for (const [phase, gr] of failingGates) {
+            const scoreStr = gr.consensusScore !== undefined
+              ? ` (score: ${gr.consensusScore.toFixed(2)})`
+              : '';
+            console.log(theme.warning(`    ${phase}${scoreStr}:`));
+
+            if (gr.blockers.length > 0) {
+              for (const blocker of gr.blockers.slice(0, 3)) {
+                console.log(`      ${theme.dim('-')} ${blocker}`);
+              }
+            } else if (gr.missingArtifacts.length > 0) {
+              console.log(`      ${theme.dim('-')} Missing artifacts: ${gr.missingArtifacts.join(', ')}`);
+            } else if (gr.failedChecks.length > 0) {
+              console.log(`      ${theme.dim('-')} Failed checks: ${gr.failedChecks.join(', ')}`);
+            } else {
+              console.log(`      ${theme.dim('-')} Gate failed (no details reported)`);
+            }
+          }
+        }
+
+        // Surface diagnostic report paths
+        const stuckReport = pl!.artifacts?.find(a => a.type === 'stuck_report');
+        const rcaReport = pl!.artifacts
+          ?.filter(a => a.type === 'rca_report')
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0];
+
+        if (stuckReport || rcaReport) {
+          console.log();
+          console.log(theme.secondary('  Diagnostic Reports:'));
+          if (stuckReport) console.log(`    ${theme.dim('Stuck report:')} ${stuckReport.path}`);
+          if (rcaReport) console.log(`    ${theme.dim('RCA report:')}   ${rcaReport.path}`);
+          // v2.6.0: Surface auto-recovery artifact and result
+          const autoRecoveryArtifact = pl!.artifacts?.find(a => a.type === 'auto_recovery_guidance');
+          if (autoRecoveryArtifact) {
+            console.log(`    ${theme.dim('Auto-recovery:')} ${autoRecoveryArtifact.path}`);
+          }
+          if (pl!.autoRecoveryResult) {
+            console.log(`    ${theme.dim('Auto-recovery result:')} ${pl!.autoRecoveryResult}`);
+          }
+        }
+
+        console.log();
+        console.log(theme.secondary('  Provide guidance when resuming to attempt recovery.'));
+      } else if (pp === 'RECOVERY_LOOP') {
+        const count = pl!.recoveryCount ?? 0;
+        const max = pl!.maxRecoveryIterations ?? 5;
+        console.log();
+        console.log(theme.warning.bold('  RECOVERY IN PROGRESS:'));
+        console.log(theme.warning(`    Failed at: ${pl!.failedPhase ?? 'unknown'}`));
+        console.log(theme.warning(`    Recovery attempts: ${count}/${max}`));
+        if (count < max) {
+          console.log(theme.secondary('    Resume will auto-retry. Optional: add guidance to steer recovery.'));
+          console.log(theme.secondary('    Once attempts are exhausted, guidance will be required.'));
+        } else {
+          console.log(theme.secondary('    All attempts exhausted. Add guidance when resuming to retry.'));
+        }
+      }
+    } else if (progressAnalysis.statusMismatch && !progressAnalysis.planMismatch) {
+      // Legacy mismatch (non-pipeline projects only)
       console.log();
       console.log(theme.warning.bold('  WARNING: Status Mismatch Detected!'));
       console.log(theme.warning(`    Project status says '${status.state.status}' but work is incomplete.`));
@@ -2196,15 +2379,22 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
     // successful build verification (sets status='complete', phase='complete').
     // If all tasks are done but status is still 'in-progress', the final
     // verification phase (build, tests, README) never completed successfully.
-    if (verification.isComplete && projectExplicitlyCompleted) {
+    const pipelineDone = status.state.pipeline?.pipelinePhase === 'DONE';
+    if ((verification.isComplete && projectExplicitlyCompleted) ||
+        (pipelineDone && progressAnalysis.totalMilestones === 0)) {
       console.log();
       printSuccess('Project is fully complete!');
       console.log();
       console.log(theme.primary.bold('  Project Summary:'));
-      console.log(`    ${theme.dim('Milestones:')} ${progressAnalysis.totalMilestones}/${progressAnalysis.totalMilestones} complete`);
-      console.log(`    ${theme.dim('Tasks:')}      ${progressAnalysis.totalTasks}/${progressAnalysis.totalTasks} complete (100%)`);
-      console.log(`    ${theme.dim('Build:')}      ${theme.success(`${buildLabel} build passed`)}`);
+      if (pipelineDone && progressAnalysis.totalMilestones === 0) {
+        console.log(`    ${theme.dim('Pipeline:')}   ${theme.success('completed')}`);
+      } else {
+        console.log(`    ${theme.dim('Milestones:')} ${progressAnalysis.totalMilestones}/${progressAnalysis.totalMilestones} complete`);
+        console.log(`    ${theme.dim('Tasks:')}      ${progressAnalysis.totalTasks}/${progressAnalysis.totalTasks} complete (100%)`);
+        console.log(`    ${theme.dim('Build:')}      ${theme.success(`${buildLabel} build passed`)}`);
+      }
       console.log(`    ${theme.dim('Location:')}   ${state.projectDir}`);
+      printNextSteps(status.state.language, state.projectDir);
       return;
     }
 
@@ -2217,9 +2407,51 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
 
     // Check if user provided context as argument
     let additionalContext = args.join(' ').trim();
+    const isStuck = pp === 'STUCK';
 
     // If no context provided, ask if they want to add guidance
-    if (!additionalContext) {
+    // v2.5.3: STUCK pipelines get context-aware prompt with blocker details and phase-specific hints
+    if (!additionalContext && isStuck) {
+      if (failingGates.length > 0) {
+        console.log();
+        console.log(theme.warning.bold('  Guidance should address:'));
+        for (const [phase, gr] of failingGates) {
+          for (const b of gr.blockers.slice(0, 2)) {
+            console.log(`    ${theme.dim('-')} [${phase}] ${b}`);
+          }
+        }
+      }
+
+      // Phase-specific actionable hints
+      let promptHint = 'e.g., "Focus on fixing the specific blocker above"';
+      if (blockingAt.startsWith('CONSENSUS_')) {
+        promptHint = 'e.g., "Reduce scope to core features only", "Split into smaller milestones", "Lower the consensus threshold"';
+      } else if (blockingAt === 'QA_VALIDATION') {
+        promptHint = 'e.g., "Fix failing test X", "Skip flaky tests", "Adjust build config"';
+      } else if (blockingAt === 'PRODUCTION_GATE') {
+        promptHint = 'e.g., "Mark finding as non-blocking", "Implement quick fix for issue X"';
+      }
+
+      console.log();
+      // Default YES — STUCK pipelines strongly need guidance
+      const wantsContext = failingGates.length > 0
+        ? await promptYesNo(theme.primary('Would you like to provide guidance to unblock the pipeline?'), true)
+        : await promptYesNo(theme.primary('Would you like to add guidance before resuming?'), false);
+
+      if (wantsContext) {
+        additionalContext = await promptForContext(
+          `What guidance would you like to give? (${promptHint})`
+        );
+      } else {
+        // v2.6.0: Don't return early — let the orchestrator attempt auto-recovery
+        // via the arbitrator before giving up. If auto-recovery fails,
+        // resumePipeline() returns STUCK and the normal error path handles it.
+        console.log();
+        console.log(theme.secondary('  No guidance provided. Attempting auto-recovery...'));
+        // additionalContext stays empty — resumePipeline will attempt auto-recovery
+      }
+    } else if (!additionalContext) {
+      // Non-STUCK: existing generic guidance prompt
       console.log();
       const wantsContext = await promptYesNo(
         theme.primary('Would you like to add guidance before resuming?'),
@@ -2298,6 +2530,8 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
       } else if (testSt === 'no-tests') {
         console.log(`    ${theme.dim('Tests:')}      ${theme.dim('No tests found')}`);
       }
+
+      printNextSteps(status.state.language, state.projectDir);
     } else if (result.rateLimitPaused) {
       // Rate limit pause - show friendly message, not an error
       console.log();
@@ -2317,8 +2551,27 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
         console.log(`    ${theme.dim('Build:')} ${theme.error(`${failBuildLabel} build failed`)}`);
       }
 
+      // v2.5.3: For STUCK failures, surface gate blockers so user knows what to fix.
+      // Try refreshed state first (from result), fall back to pre-resume state.
+      const stuckPipeline = result.state?.pipeline ?? status.state.pipeline;
+      if (stuckPipeline?.pipelinePhase === 'STUCK') {
+        const stuckFailingGates = Object.entries(stuckPipeline.gateResults)
+          .filter(([, gr]) => !gr.pass)
+          .filter(([, gr]) => gr.blockers.length > 0 || gr.missingArtifacts.length > 0 || gr.failedChecks.length > 0);
+        if (stuckFailingGates.length > 0) {
+          console.log();
+          console.log(theme.warning('  Blockers:'));
+          for (const [phase, gr] of stuckFailingGates) {
+            const firstIssue = gr.blockers[0] ?? `Missing: ${gr.missingArtifacts[0] ?? gr.failedChecks[0] ?? 'unknown'}`;
+            console.log(`    ${theme.dim('-')} [${phase}] ${firstIssue}`);
+          }
+        }
+      }
+
       printInfo('You can run /resume again with additional guidance');
     }
+    // v2.5.4: Recreate readline after workflow run (stdin corruption fix)
+    state.refreshReadline?.();
     return;
   }
 
@@ -2481,10 +2734,16 @@ async function handleResume(state: SessionState, args: string[]): Promise<void> 
 
     printSuccess('Workflow completed!');
     console.log(`    ${theme.dim('Location:')} ${state.projectDir}`);
+    if (state.projectDir) {
+      printNextSteps(spec.language, state.projectDir);
+    }
   } else {
     printError(result.error || 'Workflow failed');
     printInfo('You can run /resume again with additional guidance');
   }
+
+  // v2.5.4: Recreate readline after workflow run (stdin corruption fix)
+  state.refreshReadline?.();
 }
 
 /**
@@ -2874,7 +3133,12 @@ async function handleIdea(idea: string, state: SessionState): Promise<void> {
     state.projectDir = projectDir;
   } else {
     printError(workflowResult.error || 'Workflow failed');
+    state.projectDir = projectDir;  // v2.5.4: Project exists, track it for /resume
+    printInfo('Run /resume with guidance to continue.');
   }
+
+  // v2.5.4: Recreate readline after workflow run (stdin corruption fix)
+  state.refreshReadline?.();
 }
 
 /**
@@ -2990,7 +3254,12 @@ async function handleNewProject(idea: string, state: SessionState): Promise<void
     state.projectDir = projectDir;
   } else {
     printError(workflowResult.error || 'Workflow failed');
+    state.projectDir = projectDir;  // v2.5.4: Project exists, track it for /resume
+    printInfo('Run /resume with guidance to continue.');
   }
+
+  // v2.5.4: Recreate readline after workflow run (stdin corruption fix)
+  state.refreshReadline?.();
 }
 
 /**
@@ -3045,28 +3314,76 @@ export async function startInteractiveMode(): Promise<void> {
 
   console.log();
 
-  // Create readline interface
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+  // v2.5.4: Mutable readline — recreated after workflow runs to recover from
+  // stdin corruption caused by the Claude SDK's query() function.
+  // See src/cli/commands/debug.ts:378-379 for documentation of the issue.
+  let intentionalExit = false;
+  let isPrompting = false;
+
+  function createReadlineInterface(): readline.Interface {
+    const iface = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    // Last-resort safety net: if stdin closes unexpectedly, exit cleanly or recreate
+    iface.on('close', () => {
+      if (intentionalExit) return;
+      // Only attempt to recreate if stdin is still usable (TTY and not destroyed)
+      if (process.stdin.isTTY && !process.stdin.destroyed && !isPrompting) {
+        isPrompting = false;
+        rl = createReadlineInterface();
+        console.log();
+        printWarning('Input stream interrupted. Restoring prompt...');
+        promptUser();
+      } else {
+        // stdin is gone (piped input finished, non-TTY, etc.) — exit cleanly
+        console.log();
+        printInfo('Input stream closed (stdin EOF). Re-run in an interactive terminal if this was unexpected.');
+        process.exit(1);
+      }
+    });
+    return iface;
+  }
+
+  function refreshReadline(): void {
+    try { rl.close(); } catch { /* already closed */ }
+    rl = createReadlineInterface();
+  }
+
+  let rl = createReadlineInterface();
+
+  // Expose refreshReadline on state so handleIdea/handleResume/handleNewProject can call it
+  state.refreshReadline = refreshReadline;
 
   // Input loop
   const promptUser = (): void => {
+    if (isPrompting) return; // re-entrancy guard
+    isPrompting = true;
     drawInputBoxTop(state);
 
     rl.question(getPrompt(), async (input) => {
       // Draw bottom of input box after user presses enter
       drawInputBoxBottom();
 
-      const shouldContinue = await handleInput(input, state);
+      try {
+        const shouldContinue = await handleInput(input, state);
 
-      if (shouldContinue) {
+        if (shouldContinue) {
+          isPrompting = false;
+          console.log();
+          promptUser();
+        } else {
+          intentionalExit = true;
+          rl.close();
+          process.exit(0);
+        }
+      } catch (err) {
+        isPrompting = false;
+        printError(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+        printInfo('Returning to prompt. Your progress has been saved.');
         console.log();
+        refreshReadline();
         promptUser();
-      } else {
-        rl.close();
-        process.exit(0);
       }
     });
   };

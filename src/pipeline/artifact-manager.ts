@@ -45,6 +45,8 @@ const ARTIFACT_DIRS: Record<string, string> = {
   resolved_commands: 'checks',
   constitution: 'governance',
   change_request: 'governance',
+  additional_context: 'context',
+  skill_generation_log: 'context',
 };
 
 /** All required subdirectories under /docs/ */
@@ -62,6 +64,7 @@ const DOCS_SUBDIRS = [
   'checks',
   'journal',
   'governance',
+  'context',
 ];
 
 // ─── Helper Functions ────────────────────────────────────

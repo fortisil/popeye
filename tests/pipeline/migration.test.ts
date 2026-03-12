@@ -95,8 +95,9 @@ describe('Migration', () => {
 
       expect(pipeline.activeRoles).toContain('DISPATCHER');
       expect(pipeline.activeRoles).toContain('ARCHITECT');
-      expect(pipeline.activeRoles).toContain('BACKEND_PROGRAMMER');
-      expect(pipeline.activeRoles).not.toContain('FRONTEND_PROGRAMMER');
+      expect(pipeline.activeRoles).toContain('FRONTEND_PROGRAMMER');
+      expect(pipeline.activeRoles).toContain('UI_UX_SPECIALIST');
+      expect(pipeline.activeRoles).not.toContain('BACKEND_PROGRAMMER');
     });
 
     it('should derive roles for fullstack project', () => {
@@ -106,8 +107,8 @@ describe('Migration', () => {
       expect(pipeline.activeRoles).toContain('DB_EXPERT');
       expect(pipeline.activeRoles).toContain('BACKEND_PROGRAMMER');
       expect(pipeline.activeRoles).toContain('FRONTEND_PROGRAMMER');
-      expect(pipeline.activeRoles).toContain('WEBSITE_PROGRAMMER');
       expect(pipeline.activeRoles).toContain('UI_UX_SPECIALIST');
+      expect(pipeline.activeRoles).not.toContain('WEBSITE_PROGRAMMER');
     });
 
     it('should derive roles for website project', () => {

@@ -15,7 +15,7 @@ function escapeJsx(str: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/'/g, "\\'")
     .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
+    .replace(/\$(?=\{)/g, '\\$');
 }
 
 /**
@@ -111,6 +111,9 @@ export function generateEnhancedSitemap(
     { path: '/pricing', pageType: 'pricing' },
     { path: '/docs', pageType: 'docs' },
     { path: '/blog', pageType: 'blog' },
+    { path: '/contact', pageType: 'contact' },
+    { path: '/privacy', pageType: 'legal' },
+    { path: '/terms', pageType: 'legal' },
   ];
 
   const priorityMap: Record<string, number> = {

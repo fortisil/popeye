@@ -4,6 +4,8 @@
  * All 14 phases with specific required artifacts and checks per phase.
  */
 
+import logging from 'node:console';
+
 import type {
   PipelinePhase,
   PipelineState,
@@ -32,6 +34,7 @@ export interface GateResult {
   missingArtifacts: ArtifactType[];
   failedChecks: GateCheckType[];
   consensusScore?: number;
+  finalStatus?: string;    // v2.4.3: 'APPROVED' | 'REJECTED' | 'ARBITRATED'
   timestamp: string;
 }
 
@@ -40,14 +43,14 @@ export interface GateResult {
 const GATE_DEFINITIONS: Record<PipelinePhase, GateDefinition> = {
   INTAKE: {
     phase: 'INTAKE',
-    requiredArtifacts: ['master_plan', 'repo_snapshot', 'constitution'],
+    requiredArtifacts: ['master_plan', 'repo_snapshot'],
     requiredChecks: [],
     allowedTransitions: ['CONSENSUS_MASTER_PLAN'],
     failTransition: 'RECOVERY_LOOP',
   },
   CONSENSUS_MASTER_PLAN: {
     phase: 'CONSENSUS_MASTER_PLAN',
-    requiredArtifacts: ['master_plan', 'consensus'],
+    requiredArtifacts: ['consensus'],
     requiredChecks: [],
     consensusThreshold: 0.95,
     minReviewers: 2,
@@ -63,7 +66,7 @@ const GATE_DEFINITIONS: Record<PipelinePhase, GateDefinition> = {
   },
   CONSENSUS_ARCHITECTURE: {
     phase: 'CONSENSUS_ARCHITECTURE',
-    requiredArtifacts: ['architecture', 'consensus'],
+    requiredArtifacts: ['consensus'],
     requiredChecks: [],
     consensusThreshold: 0.95,
     minReviewers: 2,
@@ -79,8 +82,8 @@ const GATE_DEFINITIONS: Record<PipelinePhase, GateDefinition> = {
   },
   CONSENSUS_ROLE_PLANS: {
     phase: 'CONSENSUS_ROLE_PLANS',
-    requiredArtifacts: ['role_plan', 'consensus'],
-    requiredChecks: [],
+    requiredArtifacts: ['consensus'],
+    requiredChecks: ['skill_coverage'],
     consensusThreshold: 0.95,
     minReviewers: 2,
     allowedTransitions: ['IMPLEMENTATION'],
@@ -117,7 +120,7 @@ const GATE_DEFINITIONS: Record<PipelinePhase, GateDefinition> = {
   PRODUCTION_GATE: {
     phase: 'PRODUCTION_GATE',
     requiredArtifacts: ['production_readiness'],
-    requiredChecks: ['build', 'test', 'lint', 'typecheck'],
+    requiredChecks: ['build', 'test', 'lint', 'typecheck', 'skill_coverage'],
     allowedTransitions: ['DONE'],
     failTransition: 'RECOVERY_LOOP',
   },
@@ -210,7 +213,8 @@ export class GateEngine {
     // Check required check results
     const phaseChecks = pipeline.gateChecks[phase] ?? [];
     for (const requiredCheck of gateDef.requiredChecks) {
-      const checkResult = phaseChecks.find((c) => c.check_type === requiredCheck);
+      // v2.4.6: Use last check result (not first) — old failed results accumulate on retry
+      const checkResult = phaseChecks.findLast((c) => c.check_type === requiredCheck);
       if (!checkResult) {
         failedChecks.push(requiredCheck);
         blockers.push(`Missing check result: ${requiredCheck}`);
@@ -226,7 +230,18 @@ export class GateEngine {
       const consensusArtifact = findLatestConsensusForPhase(pipeline, phase);
       if (consensusArtifact) {
         consensusScore = parseConsensusScore(pipeline, phase);
-        if (consensusScore !== undefined && consensusScore < gateDef.consensusThreshold) {
+
+        // v2.4.3: Read finalStatus from phase handler's gateResult
+        const finalStatus = parseConsensusFinalStatus(pipeline, phase);
+        const isArbitrated = finalStatus === 'ARBITRATED';
+
+        if (isArbitrated) {
+          // Arbitration approved — skip threshold check
+          logging.log(
+            `[gate] Phase ${phase}: ARBITRATED overrides score check ` +
+            `(score=${consensusScore?.toFixed(2)}, threshold=${gateDef.consensusThreshold})`,
+          );
+        } else if (consensusScore !== undefined && consensusScore < gateDef.consensusThreshold) {
           blockers.push(
             `Consensus score ${consensusScore.toFixed(2)} below threshold ${gateDef.consensusThreshold}`,
           );
@@ -344,4 +359,17 @@ function parseConsensusScore(
   }
 
   return undefined;
+}
+
+/**
+ * Read finalStatus from phase handler's stored gate result.
+ * v2.4.3: Enables gate engine to respect ARBITRATED status
+ * set by consensus phase handlers.
+ */
+function parseConsensusFinalStatus(
+  pipeline: PipelineState,
+  phase: PipelinePhase,
+): string | undefined {
+  const gateResult = pipeline.gateResults[phase];
+  return gateResult?.finalStatus;
 }

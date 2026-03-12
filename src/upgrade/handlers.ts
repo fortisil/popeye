@@ -21,7 +21,7 @@ import {
   generateRootDockerCompose,
 } from '../generators/templates/fullstack.js';
 import { loadState, saveState } from '../state/persistence.js';
-import { buildWebsiteContext, resolveBrandAssets, validateWebsiteContext } from '../generators/website-context.js';
+import { buildWebsiteContext, resolveBrandAssets, validateWebsiteContext, extractDocPathsFromText } from '../generators/website-context.js';
 import type { WebsiteContentContext } from '../generators/website-context.js';
 import { resolveWorkspaceRoot } from '../generators/workspace-root.js';
 import { loadWebsiteStrategy } from '../workflow/website-strategy.js';
@@ -61,11 +61,17 @@ export async function buildUpgradeContentContext(
   projectName: string,
 ): Promise<{ context?: WebsiteContentContext; warning?: string }> {
   try {
+    // Load state once for idea text + brand context
+    const state = await loadState(projectDir);
+
     // Build context from user docs (scans projectDir + parent via getScanDirectories)
-    const context = await buildWebsiteContext(projectDir, projectName);
+    // Extract extra doc paths from state idea text if available
+    const extraDocPaths = state?.idea ? extractDocPathsFromText(state.idea) : [];
+    const context = await buildWebsiteContext(
+      projectDir, projectName, state?.specification ?? state?.idea, extraDocPaths,
+    );
 
     // Apply brand context from state if available
-    const state = await loadState(projectDir);
     if (state?.brandContext?.primaryColor) {
       context.brand = { ...context.brand, primaryColor: state.brandContext.primaryColor };
     }

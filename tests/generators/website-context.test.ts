@@ -291,9 +291,10 @@ describe('validateWebsiteContextOrThrow', () => {
     expect(result.issues).toEqual([]);
   });
 
-  it('fails when strategy is missing', () => {
+  it('does not fail when strategy is missing (strategy validated at injection time)', () => {
     const ctx: WebsiteContentContext = { ...baseContext, strategy: undefined };
-    expect(() => validateWebsiteContextOrThrow(ctx, 'gateco')).toThrow('strategy missing');
+    // Strategy absence is no longer a validation error — it's injected later by the pipeline
+    expect(() => validateWebsiteContextOrThrow(ctx, 'gateco')).not.toThrow();
   });
 
   it('fails when features are empty', () => {

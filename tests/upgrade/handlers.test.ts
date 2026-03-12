@@ -13,6 +13,7 @@ vi.mock('../../src/generators/website-context.js', () => ({
   buildWebsiteContext: vi.fn(),
   resolveBrandAssets: vi.fn(),
   validateWebsiteContext: vi.fn(),
+  extractDocPathsFromText: vi.fn().mockReturnValue([]),
 }));
 
 vi.mock('../../src/generators/workspace-root.js', () => ({
@@ -82,8 +83,8 @@ describe('buildUpgradeContentContext', () => {
     expect(context!.features).toHaveLength(1);
     expect(context!.features[0].title).toBe('Feature 1');
 
-    // Verify buildWebsiteContext was called with correct args
-    expect(mockBuildWebsiteContext).toHaveBeenCalledWith(tmpDir, 'TestProject');
+    // Verify buildWebsiteContext was called with state specification/idea fallback (null state = undefined)
+    expect(mockBuildWebsiteContext).toHaveBeenCalledWith(tmpDir, 'TestProject', undefined, []);
   });
 
   it('should apply brand context from state when available', async () => {
@@ -147,6 +148,36 @@ describe('buildUpgradeContentContext', () => {
 
     expect(context).toBeUndefined();
     expect(warning).toBe('Unknown error building website context');
+  });
+
+  it('should pass specification to buildWebsiteContext when state has it', async () => {
+    mockLoadState.mockResolvedValue({
+      name: 'TestProject',
+      language: 'all',
+      specification: 'Expanded specification text',
+      idea: 'Original idea text',
+    } as any);
+
+    await buildUpgradeContentContext(tmpDir, 'TestProject');
+
+    // specification takes priority over idea
+    expect(mockBuildWebsiteContext).toHaveBeenCalledWith(
+      tmpDir, 'TestProject', 'Expanded specification text', [],
+    );
+  });
+
+  it('should fall back to idea when state has no specification', async () => {
+    mockLoadState.mockResolvedValue({
+      name: 'TestProject',
+      language: 'all',
+      idea: 'Original idea text',
+    } as any);
+
+    await buildUpgradeContentContext(tmpDir, 'TestProject');
+
+    expect(mockBuildWebsiteContext).toHaveBeenCalledWith(
+      tmpDir, 'TestProject', 'Original idea text', [],
+    );
   });
 
   it('should work when no state or strategy exists', async () => {

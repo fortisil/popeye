@@ -16,6 +16,8 @@ export const GateCheckTypeSchema = z.enum([
   'placeholder_scan',
   'start',
   'env_check',
+  'skill_coverage',
+  'install',
 ]);
 export type GateCheckType = z.infer<typeof GateCheckTypeSchema>;
 
@@ -42,6 +44,8 @@ export const ResolvedCommandsSchema = z.object({
   typecheck: z.string().optional(),
   migrations: z.string().optional(),
   start: z.string().optional(),
+  install: z.string().optional(),
+  install_cwd: z.string().optional(),
   resolved_from: z.string(),
 });
 export type ResolvedCommands = z.infer<typeof ResolvedCommandsSchema>;

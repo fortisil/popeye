@@ -22,6 +22,9 @@ export {
   generateWebsiteTest,
   generateWebsiteDocsPage,
   generateWebsiteBlogPage,
+  generateWebsiteContactPage,
+  generateWebsitePrivacyPage,
+  generateWebsiteTermsPage,
 } from './website-layout.js';
 
 // Reusable section generators

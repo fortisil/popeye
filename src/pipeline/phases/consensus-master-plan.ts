@@ -35,13 +35,14 @@ export async function runConsensusMasterPlan(context: PhaseContext): Promise<Pha
     artifacts.push(snapshotEntry);
     pipeline.latestRepoSnapshot = artifactManager.toArtifactRef(snapshotEntry);
 
-    // 2. Find master plan artifact
-    const masterPlanArtifact = pipeline.artifacts.find((a) => a.type === 'master_plan');
+    // 2. Find latest master plan artifact (v2.4.3: reverse to get latest revision, not stale v1)
+    const masterPlanArtifact = [...pipeline.artifacts].reverse().find((a) => a.type === 'master_plan');
     if (!masterPlanArtifact) {
       return failureResult('CONSENSUS_MASTER_PLAN', 'No master plan artifact found');
     }
 
     // 3. Build plan packet
+    // v2.4.2: version tracks plan revision count for recovery loop convergence
     const planPacket = buildPlanPacket({
       phase: 'CONSENSUS_MASTER_PLAN',
       submittedBy: 'DISPATCHER',
@@ -57,11 +58,16 @@ export async function runConsensusMasterPlan(context: PhaseContext): Promise<Pha
       ],
       dependencies: [],
       constraints: [],
+      version: pipeline.recoveryCount + 1,
     });
 
     // 4. Run structured consensus
+    // v2.4.2: pass revisionDirective from sessionGuidance so reviewers see prior feedback
     const gateDef = gateEngine.getGateDefinition('CONSENSUS_MASTER_PLAN');
-    const consensusPacket = await consensusRunner.runStructuredConsensus(planPacket, gateDef);
+    const revisionDirective = pipeline.recoveryCount > 0 ? pipeline.sessionGuidance : undefined;
+    const consensusPacket = await consensusRunner.runStructuredConsensus(planPacket, gateDef, {
+      revisionDirective,
+    });
 
     // 5. Store consensus artifact
     const consensusEntry = artifactManager.createAndStoreJson(
@@ -81,6 +87,7 @@ export async function runConsensusMasterPlan(context: PhaseContext): Promise<Pha
       missingArtifacts: [],
       failedChecks: [],
       consensusScore: consensusPacket.consensus_result.score,
+      finalStatus: consensusPacket.final_status,  // v2.4.3: propagate for gate engine
       timestamp: new Date().toISOString(),
     };
 

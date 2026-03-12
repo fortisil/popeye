@@ -7,7 +7,7 @@
  */
 
 import { exec } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, extname } from 'node:path';
 
 import type {
@@ -17,13 +17,16 @@ import type {
   RepoSnapshot,
   ArtifactEntry,
   PipelinePhase,
+  PipelineState,
 } from './types.js';
 import { ArtifactManager } from './artifact-manager.js';
+import { assertSkillCoverage } from './skills/coverage-gate.js';
 
 // ─── Constants ───────────────────────────────────────────
 
 /** Default timeout per check type in milliseconds */
 const DEFAULT_TIMEOUTS: Record<string, number> = {
+  install: 15 * 60 * 1000,  // 15 minutes
   build: 20 * 60 * 1000,    // 20 minutes
   test: 10 * 60 * 1000,     // 10 minutes
   lint: 5 * 60 * 1000,      // 5 minutes
@@ -58,6 +61,7 @@ const PLACEHOLDER_PATTERNS = [
   /\btemp\b(?!late)/i, // 'temp' but not 'template'
   /lorem ipsum/i,
   /example\.com/i,
+  /coming soon/i,
 ];
 
 // ─── Command Sanitization ────────────────────────────────
@@ -198,13 +202,14 @@ export function storeCheckResults(
 
 function mapCheckTypeToArtifactType(
   checkType: GateCheckType,
-): 'build_check' | 'test_check' | 'lint_check' | 'typecheck_check' | 'placeholder_scan' {
+): 'build_check' | 'test_check' | 'lint_check' | 'typecheck_check' | 'placeholder_scan' | 'install_check' {
   switch (checkType) {
     case 'build': return 'build_check';
     case 'test': return 'test_check';
     case 'lint': return 'lint_check';
     case 'typecheck': return 'typecheck_check';
     case 'placeholder_scan': return 'placeholder_scan';
+    case 'install': return 'install_check';
     default: return 'build_check';
   }
 }
@@ -391,6 +396,41 @@ export async function runStartCheck(
   });
 }
 
+// ─── Skill Coverage Check (v2.2.1) ──────────────────────
+
+/**
+ * Run deterministic skill coverage check against pipeline state.
+ * No subprocess needed — pure in-memory assertion.
+ *
+ * Args:
+ *   pipeline: Current pipeline state with activeRoles and skillUsageEvents.
+ *   currentPhase: Current pipeline phase for phase-aware deferral (v2.4.5).
+ *     Omit for strict mode (checks all roles).
+ *
+ * Returns:
+ *   GateCheckResult with pass/fail status.
+ */
+export function runSkillCoverageCheck(
+  pipeline: PipelineState,
+  currentPhase?: PipelinePhase,
+): GateCheckResult {
+  const events = pipeline.skillUsageEvents ?? [];
+  const result = assertSkillCoverage(pipeline.activeRoles, events, pipeline, currentPhase);
+
+  return {
+    check_type: 'skill_coverage',
+    status: result.pass ? 'pass' : 'fail',
+    command: 'skill-coverage-check',
+    exit_code: result.pass ? 0 : 1,
+    stderr_summary: result.pass
+      ? `All ${result.covered.length} active roles have skill usage` +
+        (result.deferred.length > 0 ? ` (${result.deferred.length} deferred)` : '')
+      : `Missing skill usage: ${result.missing.map((m) => `${m.role} (${m.reason})`).join(', ')}`,
+    duration_ms: 0,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 // ─── Env Check (v1.1 Gap #5) ────────────────────────────
 
 /**
@@ -501,4 +541,103 @@ function parseEnvVarValues(content: string): Record<string, string> {
     vars[key] = value;
   }
   return vars;
+}
+
+// ─── Install Skip Heuristic ─────────────────────────────
+
+/** Marker file for install skip heuristic */
+interface InstallMarker {
+  lockfileHash: string;
+  timestamp: string;
+}
+
+/** Canonical lockfile names by ecosystem */
+const LOCKFILE_MAP: Record<string, string> = {
+  npm: 'package-lock.json',
+  pnpm: 'pnpm-lock.yaml',
+  yarn: 'yarn.lock',
+  bun: 'bun.lockb',
+  poetry: 'poetry.lock',
+  pip: 'requirements.txt',
+};
+
+/**
+ * Determine whether install can be skipped based on lockfile hash.
+ * Returns true only if the marker matches the current lockfile hash
+ * AND the install target directory exists (node_modules or .venv).
+ */
+export function shouldSkipInstall(projectDir: string, snapshot: RepoSnapshot): boolean {
+  const markerPath = join(projectDir, '.popeye', 'install-marker.json');
+  if (!existsSync(markerPath)) return false;
+
+  try {
+    const marker: InstallMarker = JSON.parse(readFileSync(markerPath, 'utf-8'));
+    const currentHash = getCanonicalLockfileHash(snapshot);
+    if (!currentHash || marker.lockfileHash !== currentHash) return false;
+
+    // Verify install target directory exists
+    const pm = snapshot.package_manager ?? 'npm';
+    const isPython = pm === 'pip' || pm === 'poetry';
+    const targetDir = isPython
+      ? join(projectDir, '.venv')
+      : join(projectDir, 'node_modules');
+    return existsSync(targetDir);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Write install marker after successful install.
+ * Stores the current lockfile hash for future skip checks.
+ */
+export function writeInstallMarker(projectDir: string, snapshot: RepoSnapshot): void {
+  const markerDir = join(projectDir, '.popeye');
+  const markerPath = join(markerDir, 'install-marker.json');
+
+  const lockfileHash = getCanonicalLockfileHash(snapshot);
+  if (!lockfileHash) return;
+
+  try {
+    if (!existsSync(markerDir)) {
+      mkdirSync(markerDir, { recursive: true });
+    }
+    const marker: InstallMarker = {
+      lockfileHash,
+      timestamp: new Date().toISOString(),
+    };
+    writeFileSync(markerPath, JSON.stringify(marker, null, 2));
+  } catch {
+    // Non-fatal — worst case we re-run install next time
+  }
+}
+
+/**
+ * Invalidate install marker so the next check re-runs install.
+ * Called on missing-module errors or dependency changes.
+ */
+export function invalidateInstallMarker(projectDir: string): void {
+  const markerPath = join(projectDir, '.popeye', 'install-marker.json');
+  try {
+    if (existsSync(markerPath)) unlinkSync(markerPath);
+  } catch {
+    // Non-fatal
+  }
+}
+
+/** Get content_hash of the canonical lockfile from the snapshot */
+function getCanonicalLockfileHash(snapshot: RepoSnapshot): string | undefined {
+  const pm = snapshot.package_manager ?? 'npm';
+  const lockfileName = LOCKFILE_MAP[pm];
+
+  if (lockfileName) {
+    const entry = snapshot.config_files.find((c) => c.type === lockfileName);
+    if (entry) return entry.content_hash;
+  }
+
+  // Fallback: use package.json hash if no lockfile found
+  const pkgEntry = snapshot.config_files.find((c) => c.type === 'package.json');
+  if (pkgEntry) return pkgEntry.content_hash;
+
+  return undefined;
 }

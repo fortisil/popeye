@@ -1176,6 +1176,7 @@ export async function runOptimizedConsensusProcess(
       score: combinedScore,
       analysis: combinedAnalysis,
       concerns: allConcerns,
+      blockingIssues: [],
       recommendations: allRecommendations,
       approved: combinedScore >= threshold,
       strengths: [],

@@ -10,6 +10,7 @@ import type { ConsensusResult, ArbitrationResult } from '../types/consensus.js';
 import type { OutputLanguage } from '../types/project.js';
 import { getGrokToken, GROK_API_URL } from '../auth/grok.js';
 import { DEFAULT_GROK_MODEL } from '../types/consensus.js';
+import { normalizeIssueList } from '../shared/text-utils.js';
 
 /**
  * Default Grok configuration
@@ -80,6 +81,44 @@ export async function requestConsensus(
 }
 
 /**
+ * Send a prompt directly to the Grok API and return the raw response string.
+ * No prompt wrapping or response parsing — used by the consensus runner
+ * which builds its own prompts and parses responses itself.
+ *
+ * @param prompt - The complete prompt to send
+ * @param config - Configuration for model/temperature/maxTokens
+ * @returns Raw LLM response text
+ */
+export async function requestRawReview(
+  prompt: string,
+  config: { model?: string; temperature?: number; maxTokens?: number } = {},
+): Promise<string> {
+  const {
+    model = DEFAULT_GROK_CONFIG.model,
+    temperature = DEFAULT_GROK_CONFIG.temperature,
+    maxTokens = DEFAULT_GROK_CONFIG.maxTokens,
+  } = config;
+
+  const client = await createClient();
+
+  try {
+    const completion = await client.chat.completions.create({
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature,
+      max_tokens: maxTokens,
+    });
+    return completion.choices[0]?.message?.content || '';
+  } catch (error) {
+    if (error instanceof OpenAI.RateLimitError) {
+      await sleep(5000);
+      return requestRawReview(prompt, config);
+    }
+    throw error;
+  }
+}
+
+/**
  * Request arbitration from Grok when consensus is stuck
  *
  * @param plan - The best plan achieved
@@ -144,9 +183,12 @@ STRENGTHS:
 - [etc.]
 
 CONCERNS:
-- [Concern 1]
-- [Concern 2]
+- [Non-blocking concern 1]
+- [Non-blocking concern 2]
 - [etc.]
+
+BLOCKING_ISSUES:
+- [Critical issue that must be resolved, or "None"]
 
 RECOMMENDATIONS:
 - [Recommendation 1]
@@ -253,11 +295,13 @@ export function parseConsensusResponse(response: string): ConsensusResult {
   const analysis = extractSection(response, ['ANALYSIS', '## Analysis', '### Analysis']);
   const strengthsText = extractSection(response, ['STRENGTHS', '## Strengths', '### Strengths']);
   const concernsText = extractSection(response, ['CONCERNS', '## Concerns', '### Concerns']);
+  const blockingIssuesText = extractSection(response, ['BLOCKING_ISSUES', '## Blocking Issues', '### Blocking Issues']);
   const recommendationsText = extractSection(response, ['RECOMMENDATIONS', '## Recommendations', '### Recommendations']);
 
   // Parse lists from sections
   const strengths = parseList(strengthsText);
   const concerns = parseList(concernsText);
+  const blockingIssues = normalizeIssueList(parseList(blockingIssuesText));
   const recommendations = parseList(recommendationsText);
 
   return {
@@ -265,6 +309,7 @@ export function parseConsensusResponse(response: string): ConsensusResult {
     analysis: analysis.trim(),
     strengths,
     concerns,
+    blockingIssues,
     recommendations,
     approved: score >= 95,
     rawResponse: response,
@@ -295,11 +340,11 @@ function parseArbitrationResponse(response: string): ArbitrationResult {
     approved,
     score,
     analysis,
-    criticalConcerns: criticalConcerns.filter(c => c.toLowerCase() !== 'none'),
-    minorConcerns: minorConcerns.filter(c => c.toLowerCase() !== 'none'),
-    subjectiveConcerns: subjectiveConcerns.filter(c => c.toLowerCase() !== 'none'),
+    criticalConcerns: normalizeIssueList(criticalConcerns),
+    minorConcerns: normalizeIssueList(minorConcerns),
+    subjectiveConcerns: normalizeIssueList(subjectiveConcerns),
     reasoning,
-    suggestedChanges: suggestedChanges.filter(c => !c.toLowerCase().includes('none')),
+    suggestedChanges: normalizeIssueList(suggestedChanges),
     rawResponse: response,
   };
 }

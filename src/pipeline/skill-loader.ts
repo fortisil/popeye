@@ -9,6 +9,7 @@ import { join } from 'node:path';
 
 import type { PipelineRole } from './types.js';
 import { DEFAULT_SKILLS } from './skills/defaults.js';
+import type { SkillSource } from './skills/usage-registry.js';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -19,6 +20,14 @@ export interface SkillDefinition {
   required_outputs: string[];
   constraints: string[];
   depends_on?: PipelineRole[];
+}
+
+export interface SkillLoadResult {
+  definition: SkillDefinition;
+  meta: {
+    source: SkillSource;
+    version?: string;
+  };
 }
 
 // ─── Skill Loader ────────────────────────────────────────
@@ -52,6 +61,30 @@ export class SkillLoader {
 
     this.cache.set(role, merged);
     return merged;
+  }
+
+  /**
+   * Load skill definition with metadata about the source.
+   * Returns both the merged skill and info about where it came from.
+   *
+   * Args:
+   *   role: The pipeline role to load a skill for.
+   *
+   * Returns:
+   *   SkillLoadResult with definition and source metadata.
+   */
+  loadSkillWithMeta(role: PipelineRole): SkillLoadResult {
+    const definition = this.loadSkill(role);
+    const override = this.loadMarkdownOverride(role);
+    const source: SkillSource = override?.systemPrompt ? 'project_override' : 'defaults';
+
+    return {
+      definition,
+      meta: {
+        source,
+        version: definition.version,
+      },
+    };
   }
 
   /** Load all skills for the given roles */

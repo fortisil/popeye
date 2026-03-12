@@ -3,9 +3,11 @@
  * Auto-triggered on load when pipelinePhase is missing from state.
  */
 
-import type { PipelinePhase, PipelineState, PipelineRole } from './types.js';
+import type { PipelinePhase, PipelineState } from './types.js';
 import { createDefaultPipelineState } from './types.js';
 import type { ProjectState, WorkflowPhase } from '../types/workflow.js';
+import { getActiveRoles } from './skills/role-map.js';
+import type { OutputLanguage } from '../types/project.js';
 
 // ─── Phase Mapping ───────────────────────────────────────
 
@@ -52,8 +54,8 @@ export function migrateToPipelineState(state: ProjectState): PipelineState {
   // Map legacy phase
   pipeline.pipelinePhase = toPipelinePhase(state.phase);
 
-  // Derive active roles from language
-  pipeline.activeRoles = deriveActiveRoles(state.language);
+  // Derive active roles from language using shared role-map
+  pipeline.activeRoles = getActiveRoles(state.language as OutputLanguage);
 
   return pipeline;
 }
@@ -61,31 +63,4 @@ export function migrateToPipelineState(state: ProjectState): PipelineState {
 /** Check if a state object needs pipeline migration */
 export function needsPipelineMigration(state: unknown): boolean {
   return !(state as Record<string, unknown>).pipeline;
-}
-
-// ─── Role Derivation ─────────────────────────────────────
-
-function deriveActiveRoles(language: string): PipelineRole[] {
-  const baseRoles: PipelineRole[] = [
-    'DISPATCHER', 'ARCHITECT', 'REVIEWER', 'ARBITRATOR',
-    'DEBUGGER', 'AUDITOR', 'JOURNALIST', 'RELEASE_MANAGER',
-    'QA_TESTER',
-  ];
-
-  switch (language) {
-    case 'fullstack':
-    case 'all':
-      return [
-        ...baseRoles,
-        'DB_EXPERT', 'BACKEND_PROGRAMMER', 'FRONTEND_PROGRAMMER',
-        'WEBSITE_PROGRAMMER', 'UI_UX_SPECIALIST',
-      ];
-    case 'python':
-    case 'typescript':
-      return [...baseRoles, 'BACKEND_PROGRAMMER'];
-    case 'website':
-      return [...baseRoles, 'WEBSITE_PROGRAMMER', 'MARKETING_EXPERT', 'SOCIAL_EXPERT'];
-    default:
-      return [...baseRoles, 'BACKEND_PROGRAMMER'];
-  }
 }

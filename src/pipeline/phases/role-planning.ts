@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import type { PipelineRole } from '../types.js';
 import type { PhaseContext, PhaseResult } from './phase-context.js';
 import { successResult, failureResult } from './phase-context.js';
+import { STRATEGY_ROLES, loadStrategyForRole } from '../strategy-context.js';
 
 /** Roles that produce implementation plans */
 const PLANNING_ROLES: PipelineRole[] = [
@@ -16,11 +17,14 @@ const PLANNING_ROLES: PipelineRole[] = [
   'BACKEND_PROGRAMMER',
   'FRONTEND_PROGRAMMER',
   'WEBSITE_PROGRAMMER',
+  'UI_UX_SPECIALIST',
+  'MARKETING_EXPERT',
+  'SOCIAL_EXPERT',
   'QA_TESTER',
 ];
 
 export async function runRolePlanning(context: PhaseContext): Promise<PhaseResult> {
-  const { pipeline, artifactManager, skillLoader, projectDir } = context;
+  const { pipeline, artifactManager, skillLoader, skillUsageRegistry, projectDir } = context;
   const artifacts = [];
 
   try {
@@ -46,14 +50,16 @@ export async function runRolePlanning(context: PhaseContext): Promise<PhaseResul
 
     const { executePrompt } = await import('../../adapters/claude.js');
 
-    // Generate plan for each role
+    // Load strategy once for all roles
+    const strategyBlock = loadStrategyForRole(projectDir);
+
+    // Generate plan for each role (skip roles not in activeRoles)
     for (const role of PLANNING_ROLES) {
-      // Skip website if not in active roles
-      if (role === 'WEBSITE_PROGRAMMER' && !pipeline.activeRoles.includes('WEBSITE_PROGRAMMER')) {
+      if (!pipeline.activeRoles.includes(role)) {
         continue;
       }
 
-      const skill = skillLoader.loadSkill(role);
+      const { definition: skill, meta } = skillLoader.loadSkillWithMeta(role);
 
       const planPrompt = [
         skill.systemPrompt,
@@ -64,6 +70,10 @@ export async function runRolePlanning(context: PhaseContext): Promise<PhaseResul
         '## Architecture',
         architectureContent.slice(0, 5000),
         '',
+        // Conditionally inject strategy for website/marketing/social roles
+        ...(strategyBlock && STRATEGY_ROLES.includes(role)
+          ? ['## Website Marketing Strategy (authoritative reference)', strategyBlock, '']
+          : []),
         '## Instructions',
         `Create your ${role} implementation plan. Include:`,
         '- Deterministic file-level outputs',
@@ -74,6 +84,14 @@ export async function runRolePlanning(context: PhaseContext): Promise<PhaseResul
 
       const planResult = await executePrompt(planPrompt);
       const plan = planResult.response;
+
+      // Record skill usage — role skill injected into planning prompt
+      skillUsageRegistry.record(role, 'ROLE_PLANNING', 'planning_prompt', meta.source, meta.version);
+
+      // Record strategy context usage when injected
+      if (strategyBlock && STRATEGY_ROLES.includes(role)) {
+        skillUsageRegistry.record(role, 'ROLE_PLANNING', 'strategy_context', 'disk', '1');
+      }
 
       const entry = artifactManager.createAndStoreText(
         'role_plan',

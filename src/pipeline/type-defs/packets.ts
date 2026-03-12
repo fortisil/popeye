@@ -51,8 +51,10 @@ export const ReviewerVoteSchema = z.object({
   vote: z.enum(['APPROVE', 'REJECT', 'CONDITIONAL']),
   confidence: z.number().min(0).max(1),
   blocking_issues: z.array(z.string()),
+  required_changes: z.array(z.string()).optional(),
   suggestions: z.array(z.string()),
   evidence_refs: z.array(ArtifactRefSchema),
+  reviewer_inconsistency: z.boolean().optional(),
 });
 export type ReviewerVote = z.infer<typeof ReviewerVoteSchema>;
 
@@ -69,6 +71,7 @@ export const ConsensusResultSchema = z.object({
   score: z.number().min(0).max(1),
   weighted_score: z.number().min(0).max(1),
   participating_reviewers: z.number().int(),
+  has_true_blockers: z.boolean().default(false),
 });
 
 export const ArbitratorResultSchema = z.object({
@@ -76,6 +79,13 @@ export const ArbitratorResultSchema = z.object({
   merged_patch: z.string().optional(),
   artifact_ref: ArtifactRefSchema.optional(),
 });
+
+export const NormalizationMovesSchema = z.object({
+  tagged_blockers_demoted_to_suggestions: z.number(),
+  tagged_blockers_demoted_to_required: z.number(),
+  untagged_from_blocking_routed_to_required: z.number(),
+  forced_rejects: z.number(),
+}).optional();
 
 export const ConsensusPacketSchema = z.object({
   metadata: z.object({
@@ -89,6 +99,7 @@ export const ConsensusPacketSchema = z.object({
   consensus_result: ConsensusResultSchema,
   arbitrator_result: ArbitratorResultSchema.optional(),
   final_status: z.enum(['APPROVED', 'REJECTED', 'ARBITRATED']),
+  normalization_moves: NormalizationMovesSchema,
 });
 export type ConsensusPacket = z.infer<typeof ConsensusPacketSchema>;
 
@@ -125,7 +136,13 @@ export const ChangeRequestSchema = z.object({
     affected_phases: z.array(PipelinePhaseSchema),
     risk_level: z.enum(['low', 'medium', 'high']),
   }),
-  status: z.enum(['proposed', 'approved', 'rejected']),
+  status: z.enum(['proposed', 'approved', 'rejected', 'resolved']),
   approval_artifact: ArtifactRefSchema.optional(),
+  /** Deterministic drift fingerprint for CR deduplication (v2.4.9) */
+  drift_key: z.string().optional(),
+  /** ISO timestamp when the CR was resolved (v2.4.9) */
+  resolved_at: z.string().optional(),
+  /** How the CR was resolved (v2.4.9) */
+  resolution: z.enum(['accepted_baseline', 'reverted', 'manual_override']).optional(),
 });
 export type ChangeRequest = z.infer<typeof ChangeRequestSchema>;

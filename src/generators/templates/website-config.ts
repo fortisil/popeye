@@ -93,7 +93,24 @@ module.exports = nextConfig;
 /**
  * Generate website tsconfig.json
  */
-export function generateWebsiteTsconfig(): string {
+export function generateWebsiteTsconfig(options?: {
+  workspaceMode?: boolean;
+  projectName?: string;
+}): string {
+  const paths: Record<string, string[]> = {
+    '@/*': ['./src/*'],
+  };
+
+  // Add workspace package path aliases so tsc can resolve imports
+  if (options?.workspaceMode && options?.projectName) {
+    paths[`@${options.projectName}/design-tokens/*`] = ['../../packages/design-tokens/src/*'];
+    paths[`@${options.projectName}/design-tokens`] = ['../../packages/design-tokens/src/index.ts'];
+    paths[`@${options.projectName}/ui/*`] = ['../../packages/ui/src/*'];
+    paths[`@${options.projectName}/ui`] = ['../../packages/ui/src/index.ts'];
+  }
+
+  const pathsJson = JSON.stringify(paths, null, 6).replace(/\n/g, '\n    ');
+
   return `{
   "compilerOptions": {
     "target": "ES2017",
@@ -114,12 +131,10 @@ export function generateWebsiteTsconfig(): string {
         "name": "next"
       }
     ],
-    "paths": {
-      "@/*": ["./src/*"]
-    }
+    "paths": ${pathsJson}
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "tests"]
 }
 `;
 }
@@ -421,12 +436,9 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/',
 }));
 
-// Mock next/image
+// Mock next/image (plain object mock, no JSX in .ts files)
 vi.mock('next/image', () => ({
-  default: (props: Record<string, unknown>) => {
-    // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
-    return <img {...props} />;
-  },
+  default: (props: Record<string, unknown>) => props,
 }));
 `;
 }

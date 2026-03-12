@@ -281,22 +281,33 @@ function extractFeaturesFromSource(
   return features;
 }
 
-/**
- * Extract pricing tiers from docs
- * Parses markdown tables and "Plan Positioning" sections
- */
-export function extractPricing(
-  docs: string
-): Array<{
+/** Pricing tier as extracted from docs */
+export interface PricingTier {
   name: string; price: string; period?: string;
   description: string; features: string[];
   cta: string; featured?: boolean;
-}> | undefined {
-  const tiers: Array<{
-    name: string; price: string; period?: string;
-    description: string; features: string[];
-    cta: string; featured?: boolean;
-  }> = [];
+}
+
+/** Result of pricing extraction with provenance tracking */
+export interface PricingExtractionResult {
+  tiers: PricingTier[];
+  source: 'docs' | 'none';
+  evidence?: {
+    matchedSection?: string;
+    matchedRows: number;
+    extractionMethod: 'known_plan_names' | 'table_fallback';
+  };
+}
+
+/**
+ * Extract pricing tiers from docs with provenance tracking
+ * Parses markdown tables and "Plan Positioning" sections
+ *
+ * @param docs - Combined documentation text
+ * @returns Extraction result with tiers, source provenance, and evidence
+ */
+export function extractPricing(docs: string): PricingExtractionResult {
+  const tiers: PricingTier[] = [];
 
   // Find the pricing section to avoid matching design token tables
   // Reason: "Plan-Based Color Usage" matches "Plans?" - require "Pricing" keyword
@@ -307,8 +318,11 @@ export function extractPricing(
 
   // Look for pricing overview table rows with plan names and actual prices
   const priceMap = new Map<string, string>();
+  let extractionMethod: 'known_plan_names' | 'table_fallback' | undefined;
+
   const tableRows = searchArea.match(/^\|[^|]*(?:Free|Pro|Enterprise|Starter|Growth|Team|Business)[^|]*\|.+\|$/gm);
   if (tableRows) {
+    extractionMethod = 'known_plan_names';
     for (const row of tableRows) {
       const cells = row.split('|').map((c) => c.trim()).filter(Boolean);
       if (cells.length >= 2) {
@@ -325,7 +339,41 @@ export function extractPricing(
     }
   }
 
-  if (priceMap.size === 0) return undefined;
+  // Fallback: if no known plan names found, scan pricing section for any row with price-like cell
+  if (priceMap.size === 0 && pricingSection) {
+    const allRows = pricingSection[0].match(/^\|.+\|$/gm);
+    if (allRows && allRows.length >= 3) {
+      // Detect which column is the price column from the header row
+      const headerCells = allRows[0].split('|').map((c) => c.trim()).filter(Boolean);
+      let priceColIndex = headerCells.findIndex((h) => /price|cost|monthly|\$/i.test(h));
+      if (priceColIndex < 0) priceColIndex = 1; // default: 2nd column
+
+      for (const row of allRows.slice(2)) {
+        const cells = row.split('|').map((c) => c.trim()).filter(Boolean);
+        if (cells.length < 2) continue;
+        const planName = cells[0].replace(/[🟢🔵🟣⚪🟡🟠🔴]\s*/g, '').replace(/\*\*/g, '').trim();
+        // Skip separator rows and header-like rows
+        if (/^[-=\s]+$/.test(planName) || /^(Plan|Tier|Name|Feature)/i.test(planName)) continue;
+
+        // Check price column and adjacent column for price-like content
+        for (const idx of [priceColIndex, priceColIndex === 1 ? 2 : 1]) {
+          if (idx >= cells.length) continue;
+          const price = cells[idx].replace(/<br>/g, ' / ').replace(/\*\*/g, '').trim();
+          const looksLikePrice = /^free$/i.test(price) || /^\$/.test(price)
+            || /^custom/i.test(price) || /^contact/i.test(price);
+          if (looksLikePrice && !priceMap.has(planName)) {
+            priceMap.set(planName, price);
+            break;
+          }
+        }
+      }
+      if (priceMap.size > 0) extractionMethod = 'table_fallback';
+    }
+  }
+
+  if (priceMap.size === 0) {
+    return { tiers: [], source: 'none' };
+  }
 
   // Look for plan descriptions
   const descMap = new Map<string, string>();
@@ -410,7 +458,19 @@ export function extractPricing(
     tier.features = tier.features.slice(0, 6);
   }
 
-  return tiers.length > 0 ? tiers : undefined;
+  if (tiers.length === 0) {
+    return { tiers: [], source: 'none' };
+  }
+
+  return {
+    tiers,
+    source: 'docs',
+    evidence: {
+      matchedSection: pricingSection ? pricingSection[0].split('\n')[0] : undefined,
+      matchedRows: priceMap.size,
+      extractionMethod: extractionMethod!,
+    },
+  };
 }
 
 /**

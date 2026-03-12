@@ -35,6 +35,7 @@ export interface ConsensusResult {
   analysis: string;
   strengths: string[];
   concerns: string[];
+  blockingIssues: string[];
   recommendations: string[];
   approved: boolean;
   rawResponse: string;

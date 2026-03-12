@@ -32,7 +32,12 @@ export const ArtifactTypeSchema = z.enum([
   'resolved_commands',
   'constitution',
   'change_request',
+  'recovery_fix_plan',
+  'auto_recovery_guidance',
   'additional_context',
+  'skill_generation_log',
+  'skill_usage_log',
+  'install_check',
 ]);
 export type ArtifactType = z.infer<typeof ArtifactTypeSchema>;
 

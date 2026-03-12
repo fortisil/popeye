@@ -8,6 +8,7 @@ import type { GateEngine } from '../gate-engine.js';
 import type { SkillLoader } from '../skill-loader.js';
 import type { ConsensusRunner } from '../consensus/consensus-runner.js';
 import type { ProjectState } from '../../types/workflow.js';
+import type { SkillUsageRegistry } from '../skills/usage-registry.js';
 
 // ─── PhaseContext ────────────────────────────────────────
 
@@ -19,6 +20,7 @@ export interface PhaseContext {
   artifactManager: ArtifactManager;
   gateEngine: GateEngine;
   consensusRunner: ConsensusRunner;
+  skillUsageRegistry: SkillUsageRegistry;
 }
 
 // ─── PhaseResult ─────────────────────────────────────────
@@ -39,7 +41,7 @@ export async function triggerJournalist(
   artifacts: ArtifactEntry[],
   context: PhaseContext,
 ): Promise<ArtifactEntry | null> {
-  const skill = context.skillLoader.loadSkill('JOURNALIST');
+  const { definition: skill, meta } = context.skillLoader.loadSkillWithMeta('JOURNALIST');
 
   const traceContent = [
     `# Journalist Trace — ${phase}`,
@@ -54,6 +56,9 @@ export async function triggerJournalist(
     `## Skill: ${skill.role}`,
     `${skill.systemPrompt.slice(0, 200)}...`,
   ].join('\n');
+
+  // Record skill usage — journalist skill injected into trace context
+  context.skillUsageRegistry.record('JOURNALIST', phase, 'other', meta.source, meta.version);
 
   const entry = context.artifactManager.createAndStoreText(
     'journalist_trace',

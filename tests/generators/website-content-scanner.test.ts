@@ -178,4 +178,90 @@ export default function Page() {
     expect(result.filesScanned).toBe(0);
     expect(result.issues).toHaveLength(0);
   });
+
+  it('detects "coming soon" text as error', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'src', 'app', 'page.tsx'),
+      `export default function Page() {
+  return <p>Documentation coming soon...</p>;
+}
+`,
+    );
+
+    const result = await scanGeneratedContent(tmpDir);
+
+    const comingSoonIssue = result.issues.find((i) => /coming soon/i.test(i.message));
+    expect(comingSoonIssue).toBeDefined();
+    expect(comingSoonIssue!.severity).toBe('error');
+  });
+
+  it('detects internal link to missing route as error', async () => {
+    // Create a page at /src/app/page.tsx (route: /)
+    await fs.writeFile(
+      path.join(tmpDir, 'src', 'app', 'page.tsx'),
+      `export default function Home() {
+  return <a href="/nonexistent">Broken Link</a>;
+}
+`,
+    );
+
+    const result = await scanGeneratedContent(tmpDir);
+
+    const linkIssue = result.issues.find((i) => /internal link.*nonexistent/i.test(i.message));
+    expect(linkIssue).toBeDefined();
+    expect(linkIssue!.severity).toBe('error');
+  });
+
+  it('passes for internal link to existing route', async () => {
+    // Create pages for / and /pricing
+    await fs.writeFile(
+      path.join(tmpDir, 'src', 'app', 'page.tsx'),
+      `export default function Home() {
+  return <a href="/pricing">Pricing</a>;
+}
+`,
+    );
+    await fs.mkdir(path.join(tmpDir, 'src', 'app', 'pricing'), { recursive: true });
+    await fs.writeFile(
+      path.join(tmpDir, 'src', 'app', 'pricing', 'page.tsx'),
+      `export default function Pricing() { return <div>Pricing</div>; }
+`,
+    );
+
+    const result = await scanGeneratedContent(tmpDir);
+
+    const linkIssue = result.issues.find((i) => /internal link/i.test(i.message));
+    expect(linkIssue).toBeUndefined();
+  });
+
+  it('allows anchor links (/#features)', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'src', 'app', 'page.tsx'),
+      `export default function Home() {
+  return <a href="/#features">Features</a>;
+}
+`,
+    );
+
+    const result = await scanGeneratedContent(tmpDir);
+
+    const linkIssue = result.issues.find((i) => /internal link/i.test(i.message));
+    expect(linkIssue).toBeUndefined();
+  });
+
+  it('ignores external links in internal link scan', async () => {
+    await fs.writeFile(
+      path.join(tmpDir, 'src', 'app', 'page.tsx'),
+      `export default function Home() {
+  return <div>No internal links here, just text</div>;
+}
+`,
+    );
+
+    const result = await scanGeneratedContent(tmpDir);
+
+    // No internal link issues should be reported
+    const linkIssue = result.issues.find((i) => /internal link/i.test(i.message));
+    expect(linkIssue).toBeUndefined();
+  });
 });

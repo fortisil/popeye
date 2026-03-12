@@ -578,6 +578,10 @@ export interface ProjectProgressAnalysis {
   statusMismatch: boolean;  // true if status='complete' but work is incomplete
   planMismatch: boolean;    // true if plan file has more tasks than state
 
+  // Pipeline state (when applicable)
+  pipelinePhase?: string;       // Current pipeline phase (e.g. 'DONE', 'STUCK', 'IMPLEMENTATION')
+  pipelineTerminal: boolean;    // true if pipeline is in DONE or STUCK state
+
   // Milestone breakdown (from state)
   totalMilestones: number;
   completedMilestones: number;
@@ -780,14 +784,42 @@ export async function analyzeProjectProgress(projectDir: string): Promise<Projec
     : 0;
 
   // Determine if actually complete - must match plan if plan has more tasks
-  const isActuallyComplete = totalMilestones > 0 &&
-    completedMilestones === totalMilestones &&
-    completedTasks === totalTasks &&
-    !planMismatch; // Can't be complete if plan has more tasks
+  // v2.4.6: When no milestones/tasks exist in state but project was explicitly
+  // marked complete (status='complete' + phase='complete'), trust the status.
+  // completeProject() only sets both to 'complete' after build verification passes.
+  const noTrackingData = totalMilestones === 0 && totalTasks === 0;
+  const explicitlyCompleted = state.status === 'complete' && state.phase === 'complete';
 
-  // Check for status mismatch
+  // Pipeline state detection — pipeline truth overrides milestone truth.
+  // RECOVERY_LOOP is treated as stuck-like: the pipeline was interrupted mid-recovery
+  // and will just re-fail without new guidance.
+  const pipelinePhase = state.pipeline?.pipelinePhase;
+  const pipelineStuckLike = pipelinePhase === 'STUCK' || pipelinePhase === 'RECOVERY_LOOP';
+  const pipelineTerminal = pipelinePhase === 'DONE' || pipelineStuckLike;
+  const pipelineDone = pipelinePhase === 'DONE';
+
+  let isActuallyComplete: boolean;
+  if (noTrackingData && pipelinePhase) {
+    // Pipeline project: pipeline state is the source of truth.
+    // DONE = complete, STUCK = not complete.
+    // planMismatch is irrelevant — pipeline projects don't track milestones.
+    isActuallyComplete = pipelineDone;
+  } else if (noTrackingData) {
+    // Legacy project with no tracking: trust explicit completion only
+    isActuallyComplete = explicitlyCompleted && !planMismatch;
+  } else {
+    // Standard milestone-based: all milestones + tasks must be complete
+    isActuallyComplete = totalMilestones > 0 &&
+      completedMilestones === totalMilestones &&
+      completedTasks === totalTasks &&
+      !planMismatch; // Can't be complete if plan has more tasks
+  }
+
+  // Check for status mismatch.
+  // Pipeline terminal states are handled separately — not "mismatches".
   const statusMismatch = (state.status === 'complete' || state.phase === 'complete') &&
-    (!isActuallyComplete || planMismatch);
+    (!isActuallyComplete || planMismatch) &&
+    !pipelineTerminal;
 
   // Find next items to work on
   let nextMilestone: { id: string; name: string } | undefined;
@@ -836,6 +868,15 @@ export async function analyzeProjectProgress(projectDir: string): Promise<Projec
   if (planMismatch) {
     progressSummary = `PLAN MISMATCH: State has ${completedTasks}/${totalTasks} tasks but plan has ${planTaskCount} tasks. ` +
       `Only ${percentComplete}% of plan completed.`;
+  } else if (isActuallyComplete && pipelineDone && noTrackingData) {
+    progressSummary = 'Project completed via pipeline';
+  } else if (isActuallyComplete && noTrackingData) {
+    progressSummary = 'Project completed (no milestone tracking data)';
+  } else if (pipelineStuckLike) {
+    const failedAt = state.pipeline?.failedPhase ?? 'unknown';
+    const recoveryCount = state.pipeline?.recoveryCount ?? 0;
+    const label = pipelinePhase === 'RECOVERY_LOOP' ? 'PIPELINE STUCK (in recovery)' : 'PIPELINE STUCK';
+    progressSummary = `${label}: Failed at ${failedAt} after ${recoveryCount} recovery attempts`;
   } else if (isActuallyComplete) {
     progressSummary = `All ${totalTasks} tasks complete across ${totalMilestones} milestones`;
   } else if (statusMismatch) {
@@ -848,6 +889,8 @@ export async function analyzeProjectProgress(projectDir: string): Promise<Projec
     isActuallyComplete,
     statusMismatch,
     planMismatch,
+    pipelinePhase,
+    pipelineTerminal,
     totalMilestones,
     completedMilestones,
     inProgressMilestones,
@@ -927,6 +970,15 @@ export async function verifyProjectCompletion(projectDir: string): Promise<{
  * @returns Updated state
  */
 export async function resetIncompleteProject(projectDir: string): Promise<ProjectState> {
+  const current = await loadProject(projectDir);
+
+  // Pipeline projects should not be reset via legacy path —
+  // legacy reset changes phase/status but not pipeline.pipelinePhase,
+  // creating inconsistent state. Pipeline resume handles its own recovery.
+  if (current.pipeline?.pipelinePhase) {
+    return current;
+  }
+
   const verification = await verifyProjectCompletion(projectDir);
 
   if (verification.isComplete) {
@@ -955,8 +1007,8 @@ export async function resetIncompleteProject(projectDir: string): Promise<Projec
   }
 
   // Reset any failed tasks to pending for retry
-  const current = await loadProject(projectDir);
-  const updatedMilestones = current.milestones.map(m => ({
+  const latestState = await loadProject(projectDir);
+  const updatedMilestones = latestState.milestones.map(m => ({
     ...m,
     // Reset milestone status if it was incorrectly marked complete
     status: m.tasks.every(t => t.status === 'complete')

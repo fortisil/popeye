@@ -6,6 +6,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { ConsensusResult, ArbitrationResult } from '../types/consensus.js';
 import { getGeminiToken } from '../auth/index.js';
+import { normalizeIssueList } from '../shared/text-utils.js';
 
 /**
  * Gemini model type - flexible string to support new models
@@ -70,6 +71,44 @@ export async function requestConsensus(
 
     const response = result.response.text();
     return parseConsensusResponse(response);
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+    throw new Error(`Gemini API error: ${errorMsg}`);
+  }
+}
+
+/**
+ * Send a prompt directly to the Gemini API and return the raw response string.
+ * No prompt wrapping or response parsing — used by the consensus runner
+ * which builds its own prompts and parses responses itself.
+ *
+ * @param prompt - The complete prompt to send
+ * @param config - Configuration for model/temperature/maxTokens
+ * @returns Raw LLM response text
+ */
+export async function requestRawReview(
+  prompt: string,
+  config: { model?: GeminiModel; temperature?: number; maxTokens?: number } = {},
+): Promise<string> {
+  const {
+    model = DEFAULT_GEMINI_CONFIG.model,
+    temperature = DEFAULT_GEMINI_CONFIG.temperature,
+    maxTokens = DEFAULT_GEMINI_CONFIG.maxTokens,
+  } = config;
+
+  const client = await createClient();
+  const generativeModel = client.getGenerativeModel({ model });
+
+  try {
+    const result = await generativeModel.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature,
+        maxOutputTokens: maxTokens,
+      },
+    });
+
+    return result.response.text();
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : 'Unknown error';
     throw new Error(`Gemini API error: ${errorMsg}`);
@@ -144,9 +183,12 @@ STRENGTHS:
 - [etc.]
 
 CONCERNS:
-- [Concern 1]
-- [Concern 2]
+- [Non-blocking concern 1]
+- [Non-blocking concern 2]
 - [etc.]
+
+BLOCKING_ISSUES:
+- [Critical issue that must be resolved, or "None"]
 
 RECOMMENDATIONS:
 - [Recommendation 1]
@@ -252,11 +294,13 @@ export function parseConsensusResponse(response: string): ConsensusResult {
   const analysis = extractSection(response, ['ANALYSIS', '## Analysis', '### Analysis']);
   const strengthsText = extractSection(response, ['STRENGTHS', '## Strengths', '### Strengths']);
   const concernsText = extractSection(response, ['CONCERNS', '## Concerns', '### Concerns']);
+  const blockingIssuesText = extractSection(response, ['BLOCKING_ISSUES', '## Blocking Issues', '### Blocking Issues']);
   const recommendationsText = extractSection(response, ['RECOMMENDATIONS', '## Recommendations', '### Recommendations']);
 
   // Parse lists from sections
   const strengths = parseList(strengthsText);
   const concerns = parseList(concernsText);
+  const blockingIssues = normalizeIssueList(parseList(blockingIssuesText));
   const recommendations = parseList(recommendationsText);
 
   return {
@@ -264,6 +308,7 @@ export function parseConsensusResponse(response: string): ConsensusResult {
     analysis: analysis.trim(),
     strengths,
     concerns,
+    blockingIssues,
     recommendations,
     approved: score >= 95,
     rawResponse: response,
@@ -294,11 +339,11 @@ function parseArbitrationResponse(response: string): ArbitrationResult {
     approved,
     score,
     analysis,
-    criticalConcerns: criticalConcerns.filter(c => c.toLowerCase() !== 'none'),
-    minorConcerns: minorConcerns.filter(c => c.toLowerCase() !== 'none'),
-    subjectiveConcerns: subjectiveConcerns.filter(c => c.toLowerCase() !== 'none'),
+    criticalConcerns: normalizeIssueList(criticalConcerns),
+    minorConcerns: normalizeIssueList(minorConcerns),
+    subjectiveConcerns: normalizeIssueList(subjectiveConcerns),
     reasoning,
-    suggestedChanges: suggestedChanges.filter(c => !c.toLowerCase().includes('none')),
+    suggestedChanges: normalizeIssueList(suggestedChanges),
     rawResponse: response,
   };
 }

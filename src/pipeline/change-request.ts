@@ -4,7 +4,7 @@
  * Each CR routes to the appropriate consensus phase for approval.
  */
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 
 import type {
   PipelinePhase,
@@ -24,6 +24,8 @@ export interface BuildChangeRequestArgs {
   affectedArtifacts: ArtifactRef[];
   affectedPhases: PipelinePhase[];
   riskLevel: 'low' | 'medium' | 'high';
+  /** Deterministic drift fingerprint for CR deduplication (v2.4.9) */
+  driftKey?: string;
 }
 
 /**
@@ -50,6 +52,7 @@ export function buildChangeRequest(args: BuildChangeRequestArgs): ChangeRequest 
       risk_level: args.riskLevel,
     },
     status: 'proposed',
+    drift_key: args.driftKey,
   };
 }
 
@@ -116,4 +119,63 @@ export function formatChangeRequest(cr: ChangeRequest): string {
   }
 
   return lines.join('\n');
+}
+
+// ─── Drift Key Dedup (v2.4.9) ────────────────────────────
+
+/**
+ * Compute a deterministic drift key for CR deduplication.
+ * Same drift (same change type, baseline, changed configs, content hashes)
+ * always produces the same key, regardless of input order.
+ *
+ * Args:
+ *   changeType: The CR change type (config, scope, etc.).
+ *   baselineSnapshotId: The artifact_id of the baseline snapshot.
+ *   changedConfigs: List of changed config file paths.
+ *   configHashPairs: Array of "path:beforeHash->afterHash" strings.
+ *
+ * Returns:
+ *   A 32-char hex string (SHA-256 prefix).
+ */
+export function computeDriftKey(
+  changeType: string,
+  baselineSnapshotId: string,
+  changedConfigs: string[],
+  configHashPairs: string[],
+): string {
+  const sortedConfigs = [...changedConfigs].sort().join(',');
+  const sortedPairs = [...configHashPairs].sort().join(',');
+  const input = `${changeType}|${baselineSnapshotId}|${sortedConfigs}|${sortedPairs}`;
+  return createHash('sha256').update(input).digest('hex').slice(0, 32);
+}
+
+/** Pending CR shape from PipelineState */
+interface PendingCR {
+  cr_id: string;
+  change_type: string;
+  target_phase: string;
+  status: string;
+  drift_key?: string;
+}
+
+/**
+ * Check whether a pending CR with the same drift_key already exists.
+ * Returns true if any non-rejected CR has the same drift_key (proposed,
+ * approved, or resolved CRs all count as "already tracked").
+ *
+ * Args:
+ *   pendingCRs: The current pending change requests array (may be undefined).
+ *   driftKey: The drift key to check.
+ *
+ * Returns:
+ *   true if a non-rejected duplicate exists.
+ */
+export function isDuplicateCR(
+  pendingCRs: PendingCR[] | undefined,
+  driftKey: string,
+): boolean {
+  if (!pendingCRs) return false;
+  return pendingCRs.some(
+    (cr) => cr.drift_key === driftKey && cr.status !== 'rejected',
+  );
 }

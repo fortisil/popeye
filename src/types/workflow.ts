@@ -11,6 +11,8 @@ import type { TestPlanOutput } from './tester.js';
 import { TestPlanOutputSchema, TestVerdictSchema } from './tester.js';
 import type { DbConfig } from './database.js';
 import { DbConfigSchema } from './database.js';
+import { PipelineStateSchema } from '../pipeline/types.js';
+import type { PipelineState } from '../pipeline/types.js';
 
 /**
  * Workflow phases
@@ -244,6 +246,8 @@ export interface ProjectState {
   auditLastRunAt?: string;
   /** Unique identifier for the audit run */
   auditRunId?: string;
+  /** Pipeline execution state — persisted for resume across sessions (v2.4.5) */
+  pipeline?: PipelineState;
 }
 
 /**
@@ -271,6 +275,7 @@ export const ProjectStateSchema = z.object({
         analysis: z.string(),
         strengths: z.array(z.string()),
         concerns: z.array(z.string()),
+        blockingIssues: z.array(z.string()).default([]),
         recommendations: z.array(z.string()),
         approved: z.boolean(),
         rawResponse: z.string(),
@@ -296,6 +301,7 @@ export const ProjectStateSchema = z.object({
   auditRecoveryInProgress: z.boolean().optional(),
   auditLastRunAt: z.string().optional(),
   auditRunId: z.string().optional(),
+  pipeline: PipelineStateSchema.optional(),
 });
 
 /**

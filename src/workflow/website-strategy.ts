@@ -13,6 +13,7 @@ import type {
   BrandAssetsContract,
 } from '../types/website-strategy.js';
 import { WebsiteStrategySchema } from '../types/website-strategy.js';
+import { formatWebsiteStrategy } from '../shared/website-strategy-format.js';
 import { createClient } from '../adapters/openai.js';
 
 /** File name for persisted strategy */
@@ -187,42 +188,7 @@ Respond with ONLY valid JSON, no markdown code fences or explanation.`;
 export function formatStrategyForPlanContext(
   strategy: WebsiteStrategyDocument
 ): string {
-  const lines: string[] = [];
-
-  lines.push(`### Target Customer`);
-  lines.push(`- Persona: ${strategy.icp.primaryPersona}`);
-  lines.push(`- Pain points: ${strategy.icp.painPoints.join(', ')}`);
-  lines.push('');
-
-  lines.push(`### Positioning`);
-  lines.push(`- Category: ${strategy.positioning.category}`);
-  lines.push(`- Value proposition: ${strategy.positioning.valueProposition}`);
-  lines.push(`- Differentiators: ${strategy.positioning.differentiators.join(', ')}`);
-  lines.push('');
-
-  lines.push(`### Messaging`);
-  lines.push(`- Headline: ${strategy.messaging.headline}`);
-  lines.push(`- Subheadline: ${strategy.messaging.subheadline}`);
-  lines.push('');
-
-  lines.push(`### SEO Keywords`);
-  lines.push(`- Primary: ${strategy.seoStrategy.primaryKeywords.join(', ')}`);
-  lines.push(`- Secondary: ${strategy.seoStrategy.secondaryKeywords.join(', ')}`);
-  lines.push('');
-
-  lines.push(`### Site Architecture`);
-  for (const page of strategy.siteArchitecture.pages) {
-    lines.push(`- ${page.path} (${page.pageType}): ${page.purpose}`);
-  }
-  lines.push('');
-
-  lines.push(`### Conversion Strategy`);
-  lines.push(`- Primary CTA: "${strategy.conversionStrategy.primaryCta.text}" -> ${strategy.conversionStrategy.primaryCta.href}`);
-  lines.push(`- Secondary CTA: "${strategy.conversionStrategy.secondaryCta.text}" -> ${strategy.conversionStrategy.secondaryCta.href}`);
-  lines.push(`- Trust signals: ${strategy.conversionStrategy.trustSignals.join(', ')}`);
-  lines.push(`- Lead capture: ${strategy.conversionStrategy.leadCapture}`);
-
-  return lines.join('\n');
+  return formatWebsiteStrategy(strategy);
 }
 
 /**

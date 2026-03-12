@@ -7,12 +7,12 @@ import type { PhaseContext, PhaseResult } from './phase-context.js';
 import { successResult, failureResult } from './phase-context.js';
 
 export async function runDone(context: PhaseContext): Promise<PhaseResult> {
-  const { pipeline, artifactManager, skillLoader } = context;
+  const { pipeline, artifactManager, skillLoader, skillUsageRegistry } = context;
   const artifacts = [];
 
   try {
-    // 1. Load release manager skill
-    const rmSkill = skillLoader.loadSkill('RELEASE_MANAGER');
+    // 1. Load release manager skill with metadata
+    const { definition: rmSkill, meta: rmMeta } = skillLoader.loadSkillWithMeta('RELEASE_MANAGER');
 
     // 2. Generate release notes
     const { executePrompt } = await import('../../adapters/claude.js');
@@ -30,6 +30,9 @@ export async function runDone(context: PhaseContext): Promise<PhaseResult> {
 
     const releaseResult = await executePrompt(releasePrompt);
     const releaseResponse = releaseResult.response;
+
+    // Record skill usage — release manager skill injected into prompt
+    skillUsageRegistry.record('RELEASE_MANAGER', 'DONE', 'system_prompt', rmMeta.source, rmMeta.version);
 
     // 3. Create release notes artifact
     const releaseEntry = artifactManager.createAndStoreText(
@@ -55,9 +58,17 @@ export async function runDone(context: PhaseContext): Promise<PhaseResult> {
     );
     artifacts.push(rollbackEntry);
 
+    // 6. Store skill usage log artifact
+    const usageLogEntry = artifactManager.createAndStoreJson(
+      'skill_usage_log',
+      pipeline.skillUsageEvents ?? [],
+      'DONE',
+    );
+    artifacts.push(usageLogEntry);
+
     pipeline.artifacts.push(...artifacts);
 
-    // 6. Final INDEX.md update
+    // 7. Final INDEX.md update
     artifactManager.updateIndex(pipeline.artifacts);
 
     return successResult('DONE', artifacts, 'Pipeline complete. Release artifacts created.');

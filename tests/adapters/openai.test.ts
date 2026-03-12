@@ -22,6 +22,9 @@ CONCERNS:
 - No deployment plan
 - Security considerations not addressed
 
+BLOCKING_ISSUES:
+- None
+
 RECOMMENDATIONS:
 - Add error handling middleware
 - Include deployment configuration
@@ -37,6 +40,7 @@ CONSENSUS: 85%
     expect(result.analysis).toContain('well-structured plan');
     expect(result.strengths).toContain('Clear project structure');
     expect(result.concerns).toContain('Missing error handling strategy');
+    expect(result.blockingIssues).toEqual([]);
     expect(result.recommendations).toContain('Add error handling middleware');
     expect(result.rawResponse).toBe(response);
   });
@@ -52,6 +56,9 @@ STRENGTHS:
 CONCERNS:
 - None
 
+BLOCKING_ISSUES:
+- None
+
 RECOMMENDATIONS:
 - None needed
 
@@ -62,6 +69,7 @@ CONSENSUS: 98%
 
     expect(result.score).toBe(98);
     expect(result.approved).toBe(true);
+    expect(result.blockingIssues).toEqual([]);
   });
 
   it('should handle missing sections gracefully', () => {
@@ -78,6 +86,7 @@ CONSENSUS: 70%
     expect(result.analysis).toBe('');
     expect(result.strengths).toEqual([]);
     expect(result.concerns).toEqual([]);
+    expect(result.blockingIssues).toEqual([]);
   });
 
   it('should handle missing score', () => {
@@ -110,6 +119,9 @@ CONCERNS:
 1. First concern
 2. Second concern
 
+BLOCKING_ISSUES:
+- None
+
 RECOMMENDATIONS:
 - Recommendation one
 - Recommendation two
@@ -121,6 +133,7 @@ CONSENSUS: 80%
 
     expect(result.strengths).toHaveLength(4);
     expect(result.concerns).toHaveLength(2);
+    expect(result.blockingIssues).toEqual([]);
     expect(result.recommendations).toHaveLength(2);
   });
 
@@ -141,5 +154,120 @@ CONSENSUS: 80%
   it('should handle edge case scores', () => {
     expect(parseConsensusResponse('CONSENSUS: 0%').score).toBe(0);
     expect(parseConsensusResponse('CONSENSUS: 100%').score).toBe(100);
+  });
+
+  it('should parse blocking issues as separate field', () => {
+    const response = `
+ANALYSIS: Good plan.
+
+STRENGTHS:
+- Solid architecture
+
+CONCERNS:
+- Consider adding caching
+
+BLOCKING_ISSUES:
+- Missing authentication flow
+- No database migration strategy
+
+RECOMMENDATIONS:
+- Add caching layer
+
+CONSENSUS: 72%
+`;
+    const result = parseConsensusResponse(response);
+    expect(result.blockingIssues).toEqual([
+      'Missing authentication flow',
+      'No database migration strategy',
+    ]);
+    expect(result.concerns).toEqual(['Consider adding caching']);
+  });
+
+  it('should return empty blocking issues when "None"', () => {
+    const response = `
+ANALYSIS: Good plan.
+
+STRENGTHS:
+- Solid
+
+CONCERNS:
+- Minor naming issues in the module structure
+
+BLOCKING_ISSUES:
+- None
+
+RECOMMENDATIONS:
+- Improve module names
+
+CONSENSUS: 95%
+`;
+    const result = parseConsensusResponse(response);
+    expect(result.blockingIssues).toEqual([]);
+    expect(result.approved).toBe(true);
+  });
+
+  it('should filter none-variant blocking issues like "No blocking issues found"', () => {
+    const response = `
+ANALYSIS: Good plan.
+
+STRENGTHS:
+- Solid architecture
+
+CONCERNS:
+- Minor naming issues
+
+BLOCKING_ISSUES:
+- No blocking issues found
+
+RECOMMENDATIONS:
+- Improve naming
+
+CONSENSUS: 92%
+`;
+    const result = parseConsensusResponse(response);
+    expect(result.blockingIssues).toEqual([]);
+  });
+
+  it('should filter "None identified" from blocking issues', () => {
+    const response = `
+ANALYSIS: Solid plan overall.
+
+STRENGTHS:
+- Good design choices
+
+CONCERNS:
+- Consider caching
+
+BLOCKING_ISSUES:
+- None identified
+
+RECOMMENDATIONS:
+- Add caching layer
+
+CONSENSUS: 90%
+`;
+    const result = parseConsensusResponse(response);
+    expect(result.blockingIssues).toEqual([]);
+  });
+
+  it('should handle missing BLOCKING_ISSUES section (backward compat)', () => {
+    // Old-format response without BLOCKING_ISSUES section
+    const response = `
+ANALYSIS: Good plan.
+
+STRENGTHS:
+- Fine overall structure
+
+CONCERNS:
+- Some concern about performance
+
+RECOMMENDATIONS:
+- A recommendation for optimization
+
+CONSENSUS: 90%
+`;
+    const result = parseConsensusResponse(response);
+    expect(result.blockingIssues).toEqual([]);
+    expect(result.concerns).toHaveLength(1);
   });
 });
